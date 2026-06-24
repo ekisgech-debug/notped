@@ -4,7 +4,7 @@ import os
 import uuid
 
 # Configuración visual
-st.set_page_config(page_title="NotPed - Panel", page_icon="👞", layout="centered")
+st.set_page_config(page_title="Catálogo - Calzados Salamone", page_icon="👞", layout="wide")
 
 @st.cache_resource
 def init_connection():
@@ -28,28 +28,24 @@ with st.form("form_carga", clear_on_submit=True):
 
     submit = st.form_submit_button("Guardar Producto")
 
-# 2. Lógica que se ejecuta al apretar el botón
+# 2. Lógica de carga
 if submit:
     if not articulo or not curva or not foto:
         st.warning("⚠️ Por favor completa los campos principales y sube una foto.")
     else:
         with st.spinner("Subiendo imagen y guardando datos..."):
             try:
-                # A. Le damos un nombre único a la foto para que no se pisen los archivos
                 extension = foto.name.split('.')[-1]
                 nombre_archivo = f"{uuid.uuid4()}.{extension}"
                 
-                # B. Subimos la foto al "disco duro" (bucket) de Supabase
                 supabase.storage.from_("fotos_productos").upload(
                     nombre_archivo,
                     foto.getvalue(),
                     {"content-type": foto.type}
                 )
                 
-                # C. Obtenemos el link público de la foto
                 foto_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
                 
-                # D. Guardamos toda la fila en la base de datos
                 nuevo_producto = {
                     "articulo": articulo,
                     "categoria": categoria,
@@ -64,14 +60,30 @@ if submit:
                 st.error(f"Error al guardar: {e}")
 
 st.write("---")
-st.write("### Catálogo Actualizado")
+st.title("👞 Catálogo en Vivo")
 
-# 3. Mostramos la tabla para ver cómo se va llenando
+# 3. Mostrar el catálogo con formato de grilla visual
 try:
-    respuesta = supabase.table("productos").select("*").execute()
-    if respuesta.data:
-        st.dataframe(respuesta.data)
+    respuesta = supabase.table("productos").select("*").order("id", desc=True).execute()
+    productos = respuesta.data
+
+    if productos:
+        # Creamos columnas para mostrar 3 productos por fila
+        columnas = st.columns(3)
+        
+        for index, prod in enumerate(productos):
+            # Vamos rotando las tarjetas en las 3 columnas
+            columna_actual = columnas[index % 3]
+            
+            with columna_actual:
+                st.markdown(f"### {prod['articulo']}")
+                if prod.get("foto_url"):
+                    st.image(prod["foto_url"], use_container_width=True)
+                st.markdown(f"**Categoría:** {prod['categoria']}")
+                st.markdown(f"**Precio:** ${prod['precio']:,.0f}")
+                st.markdown(f"**Curva:** {prod['curva']}")
+                st.write("---")
     else:
         st.info("No hay productos cargados todavía.")
 except Exception as e:
-    st.error("Error al cargar la tabla.")
+    st.error("Error al cargar el catálogo.")
