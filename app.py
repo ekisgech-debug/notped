@@ -31,23 +31,24 @@ if st.session_state.usuario_actual is None:
     if st.session_state.modo_recuperar:
         with st.form("recuperar_form"):
             st.subheader("Recuperar Contraseña")
-            st.write("Por motivos de seguridad, validaremos tu identidad antes de resetear tu clave.")
+            st.write("Validaremos tu identidad cruzando tu usuario con tu número de celular registrado.")
             
             recup_usr = st.text_input("Usuario / Marca").strip()
-            recup_email = st.text_input("Correo Electrónico (con el que te registraste)").strip()
+            recup_tel = st.text_input("Celular (con el que te registraste)").strip()
             submit_recup = st.form_submit_button("Validar Identidad")
             
             if submit_recup:
-                if recup_usr and recup_email:
-                    with st.spinner("Verificando credenciales..."):
-                        consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("email", recup_email).execute()
+                if recup_usr and recup_tel:
+                    with st.spinner("Verificando datos..."):
+                        # Cruzamos usuario y teléfono en la base de datos
+                        consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("telefono", recup_tel).execute()
                         
                         if consulta.data:
                             pin_seguridad = ''.join(random.choice(string.digits) for i in range(4))
                             st.success("✅ Identidad verificada con éxito.")
-                            st.info(f"🔒 **Paso Final:**\n\nPor favor, envíanos un mensaje a nuestro WhatsApp (+54 9 261 XXX-XXXX) con este código de seguridad: **{pin_seguridad}**.\n\nAl recibirlo, te asignaremos inmediatamente tu nueva contraseña.")
+                            st.info(f"🔒 **Paso Final:**\n\nDesde el celular que tienes registrado (**{recup_tel}**), envíanos un mensaje de WhatsApp con este código de seguridad: **{pin_seguridad}**.\n\nAl recibirlo, te asignaremos tu nueva contraseña.")
                         else:
-                            st.error("❌ Los datos no coinciden. Revisa tu usuario y correo.")
+                            st.error("❌ Los datos no coinciden. Revisa tu usuario y número de celular.")
                 else:
                     st.warning("⚠️ Completa ambos campos.")
             
@@ -55,32 +56,31 @@ if st.session_state.usuario_actual is None:
             st.session_state.modo_recuperar = False
             st.rerun()
                 
-    # VISTA: REGISTRARSE (SIMPLIFICADA)
+    # VISTA: REGISTRARSE
     elif st.session_state.modo_registro:
         with st.form("registro_form"):
             st.subheader("Crear Cuenta Nueva")
             st.info("💡 Tu nombre de usuario será también el nombre visible de tu negocio en el sistema.")
             
-            new_usr = st.text_input("Usuario / Nombre de tu Marca (Ej: ZapateriaCentro)").strip()
-            new_email = st.text_input("Correo Electrónico").strip()
+            tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
+            new_usr = st.text_input("Usuario / Nombre de Marca (Ej: ZapateriaCentro)").strip()
+            new_tel = st.text_input("Celular con WhatsApp (Ej: 261...)").strip()
             new_pwd = st.text_input("Contraseña", type="password")
             
-            tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
             submit_reg = st.form_submit_button("Registrarse")
             
             if submit_reg:
-                if new_usr and new_pwd and new_email:
+                if new_usr and new_pwd and new_tel:
                     rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
                     try:
                         chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
                         if chequeo.data:
                             st.error("❌ Este nombre ya está en uso. Elige otro.")
                         else:
-                            # Aquí guardamos el mismo nombre en ambos campos para no romper la base de datos
                             nuevo_user = {
                                 "usuario": new_usr, 
                                 "contrasena": new_pwd, 
-                                "email": new_email,
+                                "telefono": new_tel,
                                 "rol": rol_asignado, 
                                 "nombre_marca": new_usr 
                             }
@@ -163,17 +163,19 @@ else:
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
-                res_clientes = supabase.table("usuarios").select("usuario").eq("rol", "revendedor").execute()
+                # Ahora mostramos el nombre del usuario junto a su teléfono para mayor facilidad
+                res_clientes = supabase.table("usuarios").select("usuario", "telefono").eq("rol", "revendedor").execute()
                 if res_clientes.data:
-                    lista_clientes = [c['usuario'] for c in res_clientes.data]
+                    lista_clientes = {f"{c['usuario']} (Tel: {c.get('telefono', 'Sin cargar')})": c['usuario'] for c in res_clientes.data}
                     
                     with st.form("form_reset_admin", clear_on_submit=True):
-                        cliente_elegido = st.selectbox("Seleccionar Cliente", lista_clientes)
+                        cliente_elegido = st.selectbox("Seleccionar Cliente", list(lista_clientes.keys()))
                         nueva_clave_admin = st.text_input("Asignar Nueva Contraseña", type="password")
                         if st.form_submit_button("Forzar Reseteo de Clave"):
                             if nueva_clave_admin:
-                                supabase.table("usuarios").update({"contrasena": nueva_clave_admin}).eq("usuario", cliente_elegido).execute()
-                                st.success(f"✅ Clave actualizada correctamente para {cliente_elegido}.")
+                                usuario_a_modificar = lista_clientes[cliente_elegido]
+                                supabase.table("usuarios").update({"contrasena": nueva_clave_admin}).eq("usuario", usuario_a_modificar).execute()
+                                st.success(f"✅ Clave actualizada correctamente.")
                             else:
                                 st.warning("⚠️ Debes escribir una nueva contraseña.")
                 else:
