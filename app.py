@@ -19,7 +19,7 @@ if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = N
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "modo_registro" not in st.session_state: st.session_state.modo_registro = False
-if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = False # Nuevo estado
+if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = False
 
 # --- PANTALLA DE INGRESO / REGISTRO / RECUPERACIÓN ---
 if st.session_state.usuario_actual is None:
@@ -31,7 +31,7 @@ if st.session_state.usuario_actual is None:
             st.subheader("Recuperar Contraseña")
             st.info("🔒 Por seguridad de la plataforma mayorista, el reseteo de contraseñas se gestiona directamente con la fábrica.")
             st.write("Por favor, envíanos un mensaje para que te asignemos una nueva clave de acceso.")
-            st.markdown("📲 **WhatsApp:** +54 9 261 XXX-XXXX") # Puedes completar tu número aquí
+            st.markdown("📲 **WhatsApp:** +54 9 261 XXX-XXXX") 
             
             if st.form_submit_button("Volver al Inicio"):
                 st.session_state.modo_recuperar = False
@@ -60,7 +60,8 @@ if st.session_state.usuario_actual is None:
                         if chequeo.data:
                             st.error("❌ Este nombre de usuario ya está en uso.")
                         else:
-                            nuevo_user = = {"usuario": new_usr, "contrasena": new_pwd, "rol": rol_asignado, "nombre_marca": new_marca}
+                            # AQUÍ ESTÁ LA LÍNEA CORREGIDA (sin el doble igual)
+                            nuevo_user = {"usuario": new_usr, "contrasena": new_pwd, "rol": rol_asignado, "nombre_marca": new_marca}
                             supabase.table("usuarios").insert(nuevo_user).execute()
                             st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
                             st.session_state.modo_registro = False
@@ -138,14 +139,12 @@ else:
     if st.session_state.rol_actual == "proveedor":
         st.title("📦 Panel de Control de Fábrica")
         
-        # NUEVO: PANEL PARA RESETEAR CLAVES DE CLIENTES
+        # PANEL PARA RESETEAR CLAVES DE CLIENTES
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
-                # Buscamos a todos los que sean revendedores
                 res_clientes = supabase.table("usuarios").select("usuario", "nombre_marca").eq("rol", "revendedor").execute()
                 if res_clientes.data:
-                    # Creamos un diccionario para mostrar la marca pero usar el usuario internamente
                     lista_clientes = {f"{c['nombre_marca']} (Usuario: {c['usuario']})": c['usuario'] for c in res_clientes.data}
                     
                     with st.form("form_reset_admin", clear_on_submit=True):
