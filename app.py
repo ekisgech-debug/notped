@@ -19,14 +19,63 @@ if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = N
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "modo_registro" not in st.session_state: st.session_state.modo_registro = False
+if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = False # Nuevo estado
 
-# --- PANTALLA DE INGRESO / REGISTRO ---
+# --- PANTALLA DE INGRESO / REGISTRO / RECUPERACIÓN ---
 if st.session_state.usuario_actual is None:
     st.title("Bienvenido a NotPed")
     
-    # Alternar entre Login y Registro
-    if not st.session_state.modo_registro:
-        # PANTALLA DE LOGIN
+    # Si eligió RECUPERAR CLAVE
+    if st.session_state.modo_recuperar:
+        with st.form("recuperar_form"):
+            st.subheader("Recuperar Contraseña")
+            st.info("🔒 Por seguridad de la plataforma mayorista, el reseteo de contraseñas se gestiona directamente con la fábrica.")
+            st.write("Por favor, envíanos un mensaje para que te asignemos una nueva clave de acceso.")
+            st.markdown("📲 **WhatsApp:** +54 9 261 XXX-XXXX") # Puedes completar tu número aquí
+            
+            if st.form_submit_button("Volver al Inicio"):
+                st.session_state.modo_recuperar = False
+                st.rerun()
+                
+    # Si eligió REGISTRARSE
+    elif st.session_state.modo_registro:
+        with st.form("registro_form"):
+            st.subheader("Crear Cuenta Nueva")
+            new_usr = st.text_input("Nombre de Usuario (Ej: juan92)").strip()
+            new_pwd = st.text_input("Contraseña", type="password")
+            new_marca = st.text_input("Nombre de tu Negocio/Marca")
+            
+            tipo_cuenta = st.selectbox(
+                "¿Qué tipo de cuenta necesitas?", 
+                ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"]
+            )
+            
+            submit_reg = st.form_submit_button("Registrarse")
+            
+            if submit_reg:
+                if new_usr and new_pwd and new_marca:
+                    rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
+                    try:
+                        chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
+                        if chequeo.data:
+                            st.error("❌ Este nombre de usuario ya está en uso.")
+                        else:
+                            nuevo_user = = {"usuario": new_usr, "contrasena": new_pwd, "rol": rol_asignado, "nombre_marca": new_marca}
+                            supabase.table("usuarios").insert(nuevo_user).execute()
+                            st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
+                            st.session_state.modo_registro = False
+                            st.rerun()
+                    except Exception as e:
+                        st.error("Hubo un problema al procesar el registro.")
+                else:
+                    st.warning("⚠️ Completa todos los campos.")
+        
+        if st.button("Volver al Login"):
+            st.session_state.modo_registro = False
+            st.rerun()
+            
+    # PANTALLA DE LOGIN NORMAL
+    else:
         with st.form("login_form"):
             st.subheader("Iniciar Sesión")
             usr = st.text_input("Usuario")
@@ -44,56 +93,40 @@ if st.session_state.usuario_actual is None:
                 else:
                     st.error("❌ Usuario o contraseña incorrectos.")
         
-        if st.button("¿No tienes cuenta? Regístrate aquí"):
-            st.session_state.modo_registro = True
-            st.rerun()
-            
-    else:
-        # PANTALLA DE REGISTRO
-        with st.form("registro_form"):
-            st.subheader("Crear Cuenta Nueva")
-            new_usr = st.text_input("Nombre de Usuario")
-            new_pwd = st.text_input("Contraseña", type="password")
-            new_marca = st.text_input("Nombre de tu Negocio/Marca")
-            
-            # --- NUEVO SELECTOR DE ROL ---
-            tipo_cuenta = st.selectbox(
-                "¿Qué tipo de cuenta necesitas?", 
-                ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"]
-            )
-            
-            submit_reg = st.form_submit_button("Registrarse")
-            
-            if submit_reg:
-                if new_usr and new_pwd and new_marca:
-                    # Asignamos el rol interno según lo que eligió en el selector
-                    rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
-                    
-                    try:
-                        nuevo_user = {
-                            "usuario": new_usr,
-                            "contrasena": new_pwd,
-                            "rol": rol_asignado,
-                            "nombre_marca": new_marca
-                        }
-                        supabase.table("usuarios").insert(nuevo_user).execute()
-                        st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
-                        st.session_state.modo_registro = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error("Error: El usuario ya existe o hubo un problema de conexión.")
-                else:
-                    st.warning("⚠️ Por favor completa todos los campos.")
-        
-        if st.button("Volver al Login"):
-            st.session_state.modo_registro = False
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("¿No tienes cuenta? Regístrate"):
+                st.session_state.modo_registro = True
+                st.rerun()
+        with col2:
+            if st.button("¿Olvidaste tu contraseña?"):
+                st.session_state.modo_recuperar = True
+                st.rerun()
 
 # --- SISTEMA PRINCIPAL (YA LOGUEADO) ---
 else:
     with st.sidebar:
         st.markdown(f"### {st.session_state.marca_actual}")
         st.write(f"**Perfil:** {st.session_state.rol_actual.capitalize()}")
+        st.write(f"**Usuario:** {st.session_state.usuario_actual}")
+        
+        st.write("---")
+        with st.expander("🔐 Cambiar mi Contraseña"):
+            with st.form("form_cambio_clave", clear_on_submit=True):
+                clave_actual = st.text_input("Contraseña Actual", type="password")
+                clave_nueva = st.text_input("Nueva Contraseña", type="password")
+                clave_confirmar = st.text_input("Confirmar Nueva", type="password")
+                if st.form_submit_button("Actualizar"):
+                    consulta = supabase.table("usuarios").select("contrasena").eq("usuario", st.session_state.usuario_actual).execute()
+                    if consulta.data and consulta.data[0]["contrasena"] == clave_actual:
+                        if clave_nueva == clave_confirmar:
+                            supabase.table("usuarios").update({"contrasena": clave_nueva}).eq("usuario", st.session_state.usuario_actual).execute()
+                            st.success("✅ Contraseña actualizada.")
+                        else:
+                            st.error("❌ Las nuevas contraseñas no coinciden.")
+                    else:
+                        st.error("❌ La contraseña actual es incorrecta.")
+        
         st.write("---")
         if st.button("Cerrar Sesión"):
             st.session_state.usuario_actual = None
@@ -103,7 +136,35 @@ else:
             
     # VISTA PARA PROVEEDORES (Fábrica)
     if st.session_state.rol_actual == "proveedor":
-        st.title("📦 Panel de Control")
+        st.title("📦 Panel de Control de Fábrica")
+        
+        # NUEVO: PANEL PARA RESETEAR CLAVES DE CLIENTES
+        with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
+            st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
+            try:
+                # Buscamos a todos los que sean revendedores
+                res_clientes = supabase.table("usuarios").select("usuario", "nombre_marca").eq("rol", "revendedor").execute()
+                if res_clientes.data:
+                    # Creamos un diccionario para mostrar la marca pero usar el usuario internamente
+                    lista_clientes = {f"{c['nombre_marca']} (Usuario: {c['usuario']})": c['usuario'] for c in res_clientes.data}
+                    
+                    with st.form("form_reset_admin", clear_on_submit=True):
+                        cliente_elegido = st.selectbox("Seleccionar Cliente", list(lista_clientes.keys()))
+                        nueva_clave_admin = st.text_input("Asignar Nueva Contraseña", type="password")
+                        
+                        if st.form_submit_button("Forzar Reseteo de Clave"):
+                            if nueva_clave_admin:
+                                usuario_a_modificar = lista_clientes[cliente_elegido]
+                                supabase.table("usuarios").update({"contrasena": nueva_clave_admin}).eq("usuario", usuario_a_modificar).execute()
+                                st.success(f"✅ Clave actualizada correctamente para {cliente_elegido}.")
+                            else:
+                                st.warning("⚠️ Debes escribir una nueva contraseña.")
+                else:
+                    st.info("Todavía no tienes revendedores registrados.")
+            except Exception as e:
+                st.error("Error al cargar la lista de clientes.")
+
+        # FORMULARIO DE CARGA DE PRODUCTOS
         with st.expander("➕ Cargar Nuevo Producto", expanded=False):
             with st.form("form_carga", clear_on_submit=True):
                 articulo = st.text_input("Artículo (Ej: Bota de Cuero)")
@@ -135,7 +196,7 @@ else:
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-    # VISTA PARA TODOS (Proveedores y Revendedores)
+    # VISTA PARA TODOS (Catálogo)
     st.write("---")
     st.title("👞 Catálogo Mayorista")
     
