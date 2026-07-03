@@ -7,7 +7,7 @@ from email.mime.text import MIMEText
 import random
 import string
 
-# Configuración visual
+# Configuración visual de la plataforma
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
 
 @st.cache_resource
@@ -18,13 +18,13 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- FUNCIÓN PARA ENVIAR CORREOS ---
+# --- FUNCIÓN PARA ENVIAR CORREOS (PUERTO 587 TLS) ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     remitente = os.environ.get("EMAIL_USER")
     password = os.environ.get("EMAIL_PASS")
     
     if not remitente or not password:
-        return False
+        return False, "Faltan credenciales en Render (EMAIL_USER o EMAIL_PASS)"
 
     cuerpo = f"""Hola,
 
@@ -42,14 +42,14 @@ El equipo de NotPed"""
     msg['To'] = destinatario
     
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()  # Protocolo de seguridad TLS requerido por Google
         server.login(remitente, password)
         server.sendmail(remitente, destinatario, msg.as_string())
         server.quit()
-        return True
+        return True, "OK"
     except Exception as e:
-        print(e)
-        return False
+        return False, str(e)
 
 # --- ESTADO DE SESIÓN ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
@@ -62,37 +62,36 @@ if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = F
 if st.session_state.usuario_actual is None:
     st.title("Bienvenido a NotPed")
     
-    # --- RECUPERAR CLAVE ---
+    # VISTA: RECUPERAR CLAVE
     if st.session_state.modo_recuperar:
         with st.form("recuperar_form"):
             st.subheader("Recuperar Contraseña")
             st.write("Ingresa tu nombre de usuario y el correo electrónico con el que te registraste. Te enviaremos una contraseña temporal.")
             
-            recup_usr = st.text_input("Usuario")
-            recup_email = st.text_input("Correo Electrónico")
+            recup_usr = st.text_input("Usuario").strip()
+            recup_email = st.text_input("Correo Electrónico").strip()
             submit_recup = st.form_submit_button("Enviar nueva contraseña")
             
             if submit_recup:
                 if recup_usr and recup_email:
                     with st.spinner("Buscando usuario y enviando correo..."):
-                        # Verificamos si existe la combinación de usuario y correo
                         consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("email", recup_email).execute()
                         
                         if consulta.data:
-                            # Generamos una clave al azar de 6 letras/números
+                            # Generamos una clave al azar de 6 caracteres alfanuméricos
                             letras_numeros = string.ascii_letters + string.digits
                             clave_temporal = ''.join(random.choice(letras_numeros) for i in range(6))
                             
                             # Actualizamos la clave en Supabase
                             supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("usuario", recup_usr).execute()
                             
-                            # Enviamos el correo
-                            exito = enviar_correo_recuperacion(recup_email, clave_temporal)
+                            # Enviamos el correo usando la nueva función TLS
+                            exito, mensaje_error = enviar_correo_recuperacion(recup_email, clave_temporal)
                             
                             if exito:
                                 st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
                             else:
-                                st.error("❌ Hubo un error al enviar el correo. Revisa la configuración de Render.")
+                                st.error(f"❌ Detalles del error técnico: {mensaje_error}")
                         else:
                             st.error("❌ No encontramos ninguna cuenta con ese usuario y correo.")
                 else:
@@ -102,7 +101,7 @@ if st.session_state.usuario_actual is None:
             st.session_state.modo_recuperar = False
             st.rerun()
                 
-    # --- REGISTRARSE ---
+    # VISTA: REGISTRARSE
     elif st.session_state.modo_registro:
         with st.form("registro_form"):
             st.subheader("Crear Cuenta Nueva")
@@ -120,7 +119,7 @@ if st.session_state.usuario_actual is None:
                     try:
                         chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
                         if chequeo.data:
-                            st.error("❌ Este nombre de usuario ya está en uso.")
+                            st.error("❌ Este nombre de usuario ya está en uso. Elige otro.")
                         else:
                             nuevo_user = {
                                 "usuario": new_usr, 
@@ -142,11 +141,11 @@ if st.session_state.usuario_actual is None:
             st.session_state.modo_registro = False
             st.rerun()
             
-    # --- LOGIN NORMAL ---
+    # VISTA: LOGIN NORMAL
     else:
         with st.form("login_form"):
             st.subheader("Iniciar Sesión")
-            usr = st.text_input("Usuario")
+            usr = st.text_input("Usuario").strip()
             pwd = st.text_input("Contraseña", type="password")
             submit = st.form_submit_button("Ingresar")
             
@@ -171,7 +170,7 @@ if st.session_state.usuario_actual is None:
                 st.session_state.modo_recuperar = True
                 st.rerun()
 
-# --- SISTEMA PRINCIPAL (YA LOGUEADO) ---
+# --- SISTEMA PRINCIPAL (USUARIO CONECTADO) ---
 else:
     with st.sidebar:
         st.markdown(f"### {st.session_state.marca_actual}")
@@ -202,10 +201,11 @@ else:
             st.session_state.marca_actual = None
             st.rerun()
             
-    # VISTA PARA PROVEEDORES
+    # PERFIL: PROVEEDOR (FÁBRICA)
     if st.session_state.rol_actual == "proveedor":
         st.title("📦 Panel de Control de Fábrica")
         
+        # Panel de administración de claves para clientes
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
@@ -228,6 +228,7 @@ else:
             except Exception as e:
                 st.error("Error al cargar la lista de clientes.")
 
+        # Formulario para subir calzados al catálogo
         with st.expander("➕ Cargar Nuevo Producto", expanded=False):
             with st.form("form_carga", clear_on_submit=True):
                 articulo = st.text_input("Artículo (Ej: Bota de Cuero)")
@@ -250,11 +251,11 @@ else:
                                 
                                 nuevo_producto = {"articulo": articulo, "categoria": categoria, "precio": precio, "curva": curva, "foto_url": foto_url}
                                 supabase.table("productos").insert(nuevo_producto).execute()
-                                st.success("✅ ¡Producto cargado!")
+                                st.success("✅ ¡Producto cargado con éxito!")
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-    # VISTA CATÁLOGO
+    # VISTA: CATÁLOGO PÚBLICO (Visible para todos una vez logueados)
     st.write("---")
     st.title("👞 Catálogo Mayorista")
     
