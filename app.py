@@ -2,6 +2,10 @@ import streamlit as st
 from supabase import create_client, Client
 import os
 import uuid
+import smtplib
+from email.mime.text import MIMEText
+import random
+import string
 
 # Configuración visual
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
@@ -14,6 +18,39 @@ def init_connection():
 
 supabase: Client = init_connection()
 
+# --- FUNCIÓN PARA ENVIAR CORREOS ---
+def enviar_correo_recuperacion(destinatario, nueva_clave):
+    remitente = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASS")
+    
+    if not remitente or not password:
+        return False
+
+    cuerpo = f"""Hola,
+
+Se ha solicitado un reseteo de contraseña para tu cuenta en NotPed.
+Tu nueva contraseña temporal es: {nueva_clave}
+
+Por favor, ingresa a la plataforma con esta clave y cámbiala desde tu panel lateral lo antes posible.
+
+Saludos,
+El equipo de NotPed"""
+
+    msg = MIMEText(cuerpo)
+    msg['Subject'] = 'Recuperación de Contraseña - NotPed'
+    msg['From'] = remitente
+    msg['To'] = destinatario
+    
+    try:
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(remitente, password)
+        server.sendmail(remitente, destinatario, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
 # --- ESTADO DE SESIÓN ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
@@ -25,43 +62,73 @@ if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = F
 if st.session_state.usuario_actual is None:
     st.title("Bienvenido a NotPed")
     
-    # Si eligió RECUPERAR CLAVE
+    # --- RECUPERAR CLAVE ---
     if st.session_state.modo_recuperar:
         with st.form("recuperar_form"):
             st.subheader("Recuperar Contraseña")
-            st.info("🔒 Por seguridad de la plataforma mayorista, el reseteo de contraseñas se gestiona directamente con la fábrica.")
-            st.write("Por favor, envíanos un mensaje para que te asignemos una nueva clave de acceso.")
-            st.markdown("📲 **WhatsApp:** +54 9 261 XXX-XXXX") 
+            st.write("Ingresa tu nombre de usuario y el correo electrónico con el que te registraste. Te enviaremos una contraseña temporal.")
             
-            if st.form_submit_button("Volver al Inicio"):
-                st.session_state.modo_recuperar = False
-                st.rerun()
+            recup_usr = st.text_input("Usuario")
+            recup_email = st.text_input("Correo Electrónico")
+            submit_recup = st.form_submit_button("Enviar nueva contraseña")
+            
+            if submit_recup:
+                if recup_usr and recup_email:
+                    with st.spinner("Buscando usuario y enviando correo..."):
+                        # Verificamos si existe la combinación de usuario y correo
+                        consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("email", recup_email).execute()
+                        
+                        if consulta.data:
+                            # Generamos una clave al azar de 6 letras/números
+                            letras_numeros = string.ascii_letters + string.digits
+                            clave_temporal = ''.join(random.choice(letras_numeros) for i in range(6))
+                            
+                            # Actualizamos la clave en Supabase
+                            supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("usuario", recup_usr).execute()
+                            
+                            # Enviamos el correo
+                            exito = enviar_correo_recuperacion(recup_email, clave_temporal)
+                            
+                            if exito:
+                                st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
+                            else:
+                                st.error("❌ Hubo un error al enviar el correo. Revisa la configuración de Render.")
+                        else:
+                            st.error("❌ No encontramos ninguna cuenta con ese usuario y correo.")
+                else:
+                    st.warning("⚠️ Completa ambos campos.")
+            
+        if st.button("Volver al Inicio"):
+            st.session_state.modo_recuperar = False
+            st.rerun()
                 
-    # Si eligió REGISTRARSE
+    # --- REGISTRARSE ---
     elif st.session_state.modo_registro:
         with st.form("registro_form"):
             st.subheader("Crear Cuenta Nueva")
             new_usr = st.text_input("Nombre de Usuario (Ej: juan92)").strip()
+            new_email = st.text_input("Correo Electrónico").strip()
             new_pwd = st.text_input("Contraseña", type="password")
             new_marca = st.text_input("Nombre de tu Negocio/Marca")
             
-            tipo_cuenta = st.selectbox(
-                "¿Qué tipo de cuenta necesitas?", 
-                ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"]
-            )
-            
+            tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
             submit_reg = st.form_submit_button("Registrarse")
             
             if submit_reg:
-                if new_usr and new_pwd and new_marca:
+                if new_usr and new_pwd and new_marca and new_email:
                     rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
                     try:
                         chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
                         if chequeo.data:
                             st.error("❌ Este nombre de usuario ya está en uso.")
                         else:
-                            # AQUÍ ESTÁ LA LÍNEA CORREGIDA (sin el doble igual)
-                            nuevo_user = {"usuario": new_usr, "contrasena": new_pwd, "rol": rol_asignado, "nombre_marca": new_marca}
+                            nuevo_user = {
+                                "usuario": new_usr, 
+                                "contrasena": new_pwd, 
+                                "email": new_email,
+                                "rol": rol_asignado, 
+                                "nombre_marca": new_marca
+                            }
                             supabase.table("usuarios").insert(nuevo_user).execute()
                             st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
                             st.session_state.modo_registro = False
@@ -75,7 +142,7 @@ if st.session_state.usuario_actual is None:
             st.session_state.modo_registro = False
             st.rerun()
             
-    # PANTALLA DE LOGIN NORMAL
+    # --- LOGIN NORMAL ---
     else:
         with st.form("login_form"):
             st.subheader("Iniciar Sesión")
@@ -135,11 +202,10 @@ else:
             st.session_state.marca_actual = None
             st.rerun()
             
-    # VISTA PARA PROVEEDORES (Fábrica)
+    # VISTA PARA PROVEEDORES
     if st.session_state.rol_actual == "proveedor":
         st.title("📦 Panel de Control de Fábrica")
         
-        # PANEL PARA RESETEAR CLAVES DE CLIENTES
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
@@ -150,7 +216,6 @@ else:
                     with st.form("form_reset_admin", clear_on_submit=True):
                         cliente_elegido = st.selectbox("Seleccionar Cliente", list(lista_clientes.keys()))
                         nueva_clave_admin = st.text_input("Asignar Nueva Contraseña", type="password")
-                        
                         if st.form_submit_button("Forzar Reseteo de Clave"):
                             if nueva_clave_admin:
                                 usuario_a_modificar = lista_clientes[cliente_elegido]
@@ -163,7 +228,6 @@ else:
             except Exception as e:
                 st.error("Error al cargar la lista de clientes.")
 
-        # FORMULARIO DE CARGA DE PRODUCTOS
         with st.expander("➕ Cargar Nuevo Producto", expanded=False):
             with st.form("form_carga", clear_on_submit=True):
                 articulo = st.text_input("Artículo (Ej: Bota de Cuero)")
@@ -181,21 +245,16 @@ else:
                             try:
                                 extension = foto.name.split('.')[-1]
                                 nombre_archivo = f"{uuid.uuid4()}.{extension}"
-                                supabase.storage.from_("fotos_productos").upload(
-                                    nombre_archivo, foto.getvalue(), {"content-type": foto.type}
-                                )
+                                supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
                                 foto_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
                                 
-                                nuevo_producto = {
-                                    "articulo": articulo, "categoria": categoria,
-                                    "precio": precio, "curva": curva, "foto_url": foto_url
-                                }
+                                nuevo_producto = {"articulo": articulo, "categoria": categoria, "precio": precio, "curva": curva, "foto_url": foto_url}
                                 supabase.table("productos").insert(nuevo_producto).execute()
                                 st.success("✅ ¡Producto cargado!")
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-    # VISTA PARA TODOS (Catálogo)
+    # VISTA CATÁLOGO
     st.write("---")
     st.title("👞 Catálogo Mayorista")
     
