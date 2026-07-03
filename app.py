@@ -65,15 +65,12 @@ if st.session_state.usuario_actual is None:
             new_usr = st.text_input("Usuario / Nombre de Marca (Ej: ZapateriaCentro)").strip()
             new_tel = st.text_input("Celular con WhatsApp (Ej: 261...)").strip()
             new_pwd = st.text_input("Contraseña", type="password")
-            
-            # NUEVO: Campo para reconfirmar la contraseña
             new_pwd_confirm = st.text_input("Confirmar Contraseña", type="password")
             
             submit_reg = st.form_submit_button("Registrarse")
             
             if submit_reg:
                 if new_usr and new_pwd and new_pwd_confirm and new_tel:
-                    # NUEVA VALIDACIÓN: Chequeamos que coincidan antes de seguir
                     if new_pwd != new_pwd_confirm:
                         st.error("❌ Las contraseñas no coinciden. Por favor, verifica e inténtalo de nuevo.")
                     else:
@@ -134,9 +131,17 @@ if st.session_state.usuario_actual is None:
 
 # --- SISTEMA PRINCIPAL (USUARIO CONECTADO) ---
 else:
+    # --- BARRA LATERAL (COMÚN PARA TODOS) ---
     with st.sidebar:
         st.markdown(f"### {st.session_state.usuario_actual}")
-        st.write(f"**Perfil:** {st.session_state.rol_actual.capitalize()}")
+        
+        # Etiqueta visual según el rol
+        if st.session_state.rol_actual == "super_admin":
+            st.info("👑 Súper Administrador")
+        elif st.session_state.rol_actual == "proveedor":
+            st.success("🏭 Fábrica / Proveedor")
+        else:
+            st.warning("🛒 Revendedor")
         
         st.write("---")
         with st.expander("🔐 Cambiar mi Contraseña"):
@@ -162,32 +167,44 @@ else:
             st.session_state.marca_actual = None
             st.rerun()
             
-    # PERFIL: PROVEEDOR (FÁBRICA)
-    if st.session_state.rol_actual == "proveedor":
-        st.title("📦 Panel de Control de Fábrica")
+
+    # ==========================================
+    # 1. VISTA: SÚPER ADMINISTRADOR (TU PANEL)
+    # ==========================================
+    if st.session_state.rol_actual == "super_admin":
+        st.title("⚙️ Tablero Maestro - NotPed")
+        st.write("Panel exclusivo de administración de la plataforma.")
         
-        with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
-            st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
+        with st.expander("👥 Gestión Global de Usuarios (Resetear Claves)", expanded=False):
+            st.write("Aquí puedes forzar el cambio de contraseña de cualquier usuario que te lo solicite.")
             try:
-                res_clientes = supabase.table("usuarios").select("usuario", "telefono").eq("rol", "revendedor").execute()
-                if res_clientes.data:
-                    lista_clientes = {f"{c['usuario']} (Tel: {c.get('telefono', 'Sin cargar')})": c['usuario'] for c in res_clientes.data}
+                # Buscamos a todos los usuarios que NO sean el super_admin
+                res_usuarios = supabase.table("usuarios").select("usuario", "telefono", "rol").neq("rol", "super_admin").execute()
+                if res_usuarios.data:
+                    lista_usuarios = {f"{u['usuario']} | Rol: {u['rol']} | Tel: {u.get('telefono', 'N/A')}": u['usuario'] for u in res_usuarios.data}
                     
                     with st.form("form_reset_admin", clear_on_submit=True):
-                        cliente_elegido = st.selectbox("Seleccionar Cliente", list(lista_clientes.keys()))
+                        usr_elegido = st.selectbox("Seleccionar Usuario", list(lista_usuarios.keys()))
                         nueva_clave_admin = st.text_input("Asignar Nueva Contraseña", type="password")
                         if st.form_submit_button("Forzar Reseteo de Clave"):
                             if nueva_clave_admin:
-                                usuario_a_modificar = lista_clientes[cliente_elegido]
+                                usuario_a_modificar = lista_usuarios[usr_elegido]
                                 supabase.table("usuarios").update({"contrasena": nueva_clave_admin}).eq("usuario", usuario_a_modificar).execute()
-                                st.success(f"✅ Clave actualizada correctamente.")
+                                st.success(f"✅ Clave actualizada correctamente para {usuario_a_modificar}.")
                             else:
                                 st.warning("⚠️ Debes escribir una nueva contraseña.")
                 else:
-                    st.info("Todavía no tienes revendedores registrados.")
+                    st.info("No hay usuarios registrados en la plataforma.")
             except Exception as e:
-                st.error("Error al cargar la lista de clientes.")
+                st.error(f"Error al cargar usuarios: {e}")
 
+
+    # ==========================================
+    # 2. VISTA: FÁBRICA / PROVEEDOR
+    # ==========================================
+    elif st.session_state.rol_actual == "proveedor":
+        st.title("📦 Mi Fábrica")
+        
         with st.expander("➕ Cargar Nuevo Producto", expanded=False):
             with st.form("form_carga", clear_on_submit=True):
                 articulo = st.text_input("Artículo (Ej: Bota de Cuero)")
@@ -195,46 +212,94 @@ else:
                 precio = st.number_input("Precio ($)", min_value=0)
                 curva = st.text_input("Curva de Talles (Ej: 35-40)")
                 foto = st.file_uploader("Foto del Producto", type=["jpg", "png", "jpeg"])
-                submit_prod = st.form_submit_button("Guardar Producto")
+                submit_prod = st.form_submit_button("Guardar en mi Catálogo")
 
                 if submit_prod:
                     if not articulo or not curva or not foto:
                         st.warning("⚠️ Completa los campos principales y sube una foto.")
                     else:
-                        with st.spinner("Guardando..."):
+                        with st.spinner("Subiendo producto..."):
                             try:
                                 extension = foto.name.split('.')[-1]
                                 nombre_archivo = f"{uuid.uuid4()}.{extension}"
                                 supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
                                 foto_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
                                 
-                                nuevo_producto = {"articulo": articulo, "categoria": categoria, "precio": precio, "curva": curva, "foto_url": foto_url}
+                                # GUARDAMOS EL PRODUCTO CON LA FIRMA DE ESTA FÁBRICA
+                                nuevo_producto = {
+                                    "articulo": articulo, 
+                                    "categoria": categoria, 
+                                    "precio": precio, 
+                                    "curva": curva, 
+                                    "foto_url": foto_url,
+                                    "proveedor": st.session_state.usuario_actual
+                                }
                                 supabase.table("productos").insert(nuevo_producto).execute()
                                 st.success("✅ ¡Producto cargado con éxito!")
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-    # VISTA: CATÁLOGO PÚBLICO
-    st.write("---")
-    st.title("👞 Catálogo Mayorista")
-    
-    try:
-        respuesta = supabase.table("productos").select("*").order("id", desc=True).execute()
-        productos = respuesta.data
+        # La fábrica solo ve sus propios productos
+        st.write("---")
+        st.subheader("👠 Mis Productos Activos")
+        try:
+            respuesta = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
+            productos = respuesta.data
 
-        if productos:
-            columnas = st.columns(3)
-            for index, prod in enumerate(productos):
-                columna_actual = columnas[index % 3]
-                with columna_actual:
-                    st.markdown(f"### {prod['articulo']}")
-                    if prod.get("foto_url"):
-                        st.image(prod["foto_url"], use_container_width=True)
-                    st.markdown(f"**Categoría:** {prod['categoria']}")
-                    st.markdown(f"**Precio:** ${prod['precio']:,.0f}")
-                    st.markdown(f"**Curva:** {prod['curva']}")
-                    st.write("---")
-        else:
-            st.info("No hay productos cargados todavía.")
-    except Exception as e:
-        st.error("Error al cargar el catálogo.")
+            if productos:
+                columnas = st.columns(3)
+                for index, prod in enumerate(productos):
+                    columna_actual = columnas[index % 3]
+                    with columna_actual:
+                        st.markdown(f"**{prod['articulo']}**")
+                        if prod.get("foto_url"):
+                            st.image(prod["foto_url"], use_container_width=True)
+                        st.markdown(f"Cat: {prod['categoria']} | **${prod['precio']:,.0f}**")
+                        st.write("---")
+            else:
+                st.info("Aún no has cargado ningún producto en tu catálogo.")
+        except Exception as e:
+            st.error("Error al cargar tu catálogo.")
+
+
+    # ==========================================
+    # 3. VISTA: REVENDEDOR
+    # ==========================================
+    elif st.session_state.rol_actual == "revendedor":
+        st.title("👞 Plataforma Mayorista")
+        
+        try:
+            # Buscamos qué fábricas están disponibles
+            res_fabricas = supabase.table("usuarios").select("usuario").eq("rol", "proveedor").execute()
+            lista_fabricas = [f['usuario'] for f in res_fabricas.data] if res_fabricas.data else []
+            
+            if lista_fabricas:
+                # Selector de fábrica
+                st.write("### Selecciona el catálogo de una fábrica para ver sus productos:")
+                fabrica_elegida = st.selectbox("Fábricas disponibles", lista_fabricas)
+                st.write("---")
+                
+                # Mostramos los productos SOLO de la fábrica que eligió
+                res_productos = supabase.table("productos").select("*").eq("proveedor", fabrica_elegida).order("id", desc=True).execute()
+                productos = res_productos.data
+                
+                if productos:
+                    st.subheader(f"Catálogo de: {fabrica_elegida}")
+                    columnas = st.columns(3)
+                    for index, prod in enumerate(productos):
+                        columna_actual = columnas[index % 3]
+                        with columna_actual:
+                            st.markdown(f"### {prod['articulo']}")
+                            if prod.get("foto_url"):
+                                st.image(prod["foto_url"], use_container_width=True)
+                            st.markdown(f"**Categoría:** {prod['categoria']}")
+                            st.markdown(f"**Precio:** ${prod['precio']:,.0f}")
+                            st.markdown(f"**Curva:** {prod['curva']}")
+                            st.write("---")
+                else:
+                    st.info(f"La fábrica {fabrica_elegida} aún no ha cargado productos.")
+            else:
+                st.info("Actualmente no hay fábricas registradas en la plataforma.")
+                
+        except Exception as e:
+            st.error("Error al cargar la información.")
