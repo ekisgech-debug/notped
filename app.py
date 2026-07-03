@@ -40,7 +40,6 @@ if st.session_state.usuario_actual is None:
             if submit_recup:
                 if recup_usr and recup_tel:
                     with st.spinner("Verificando datos..."):
-                        # Cruzamos usuario y teléfono en la base de datos
                         consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("telefono", recup_tel).execute()
                         
                         if consulta.data:
@@ -67,29 +66,36 @@ if st.session_state.usuario_actual is None:
             new_tel = st.text_input("Celular con WhatsApp (Ej: 261...)").strip()
             new_pwd = st.text_input("Contraseña", type="password")
             
+            # NUEVO: Campo para reconfirmar la contraseña
+            new_pwd_confirm = st.text_input("Confirmar Contraseña", type="password")
+            
             submit_reg = st.form_submit_button("Registrarse")
             
             if submit_reg:
-                if new_usr and new_pwd and new_tel:
-                    rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
-                    try:
-                        chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
-                        if chequeo.data:
-                            st.error("❌ Este nombre ya está en uso. Elige otro.")
-                        else:
-                            nuevo_user = {
-                                "usuario": new_usr, 
-                                "contrasena": new_pwd, 
-                                "telefono": new_tel,
-                                "rol": rol_asignado, 
-                                "nombre_marca": new_usr 
-                            }
-                            supabase.table("usuarios").insert(nuevo_user).execute()
-                            st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
-                            st.session_state.modo_registro = False
-                            st.rerun()
-                    except Exception as e:
-                        st.error("Hubo un problema al procesar el registro.")
+                if new_usr and new_pwd and new_pwd_confirm and new_tel:
+                    # NUEVA VALIDACIÓN: Chequeamos que coincidan antes de seguir
+                    if new_pwd != new_pwd_confirm:
+                        st.error("❌ Las contraseñas no coinciden. Por favor, verifica e inténtalo de nuevo.")
+                    else:
+                        rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
+                        try:
+                            chequeo = supabase.table("usuarios").select("id").eq("usuario", new_usr).execute()
+                            if chequeo.data:
+                                st.error("❌ Este nombre ya está en uso. Elige otro.")
+                            else:
+                                nuevo_user = {
+                                    "usuario": new_usr, 
+                                    "contrasena": new_pwd, 
+                                    "telefono": new_tel,
+                                    "rol": rol_asignado, 
+                                    "nombre_marca": new_usr 
+                                }
+                                supabase.table("usuarios").insert(nuevo_user).execute()
+                                st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
+                                st.session_state.modo_registro = False
+                                st.rerun()
+                        except Exception as e:
+                            st.error("Hubo un problema al procesar el registro.")
                 else:
                     st.warning("⚠️ Completa todos los campos.")
         
@@ -163,7 +169,6 @@ else:
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
-                # Ahora mostramos el nombre del usuario junto a su teléfono para mayor facilidad
                 res_clientes = supabase.table("usuarios").select("usuario", "telefono").eq("rol", "revendedor").execute()
                 if res_clientes.data:
                     lista_clientes = {f"{c['usuario']} (Tel: {c.get('telefono', 'Sin cargar')})": c['usuario'] for c in res_clientes.data}
