@@ -2,8 +2,6 @@ import streamlit as st
 from supabase import create_client, Client
 import os
 import uuid
-import smtplib
-from email.mime.text import MIMEText
 import random
 import string
 
@@ -18,39 +16,6 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- FUNCIÓN PARA ENVIAR CORREOS (PUERTO 587 TLS) ---
-def enviar_correo_recuperacion(destinatario, nueva_clave):
-    remitente = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASS")
-    
-    if not remitente or not password:
-        return False, "Faltan credenciales en Render (EMAIL_USER o EMAIL_PASS)"
-
-    cuerpo = f"""Hola,
-
-Se ha solicitado un reseteo de contraseña para tu cuenta en NotPed.
-Tu nueva contraseña temporal es: {nueva_clave}
-
-Por favor, ingresa a la plataforma con esta clave y cámbiala desde tu panel lateral lo antes posible.
-
-Saludos,
-El equipo de NotPed"""
-
-    msg = MIMEText(cuerpo)
-    msg['Subject'] = 'Recuperación de Contraseña - NotPed'
-    msg['From'] = remitente
-    msg['To'] = destinatario
-    
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()  # Protocolo de seguridad TLS requerido por Google
-        server.login(remitente, password)
-        server.sendmail(remitente, destinatario, msg.as_string())
-        server.quit()
-        return True, "OK"
-    except Exception as e:
-        return False, str(e)
-
 # --- ESTADO DE SESIÓN ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
@@ -62,38 +27,28 @@ if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = F
 if st.session_state.usuario_actual is None:
     st.title("Bienvenido a NotPed")
     
-    # VISTA: RECUPERAR CLAVE
+    # VISTA: RECUPERAR CLAVE (MÉTODO HÍBRIDO SEGURO)
     if st.session_state.modo_recuperar:
         with st.form("recuperar_form"):
             st.subheader("Recuperar Contraseña")
-            st.write("Ingresa tu nombre de usuario y el correo electrónico con el que te registraste. Te enviaremos una contraseña temporal.")
+            st.write("Por motivos de seguridad, validaremos tu identidad antes de resetear tu clave.")
             
             recup_usr = st.text_input("Usuario").strip()
-            recup_email = st.text_input("Correo Electrónico").strip()
-            submit_recup = st.form_submit_button("Enviar nueva contraseña")
+            recup_email = st.text_input("Correo Electrónico (con el que te registraste)").strip()
+            submit_recup = st.form_submit_button("Validar Identidad")
             
             if submit_recup:
                 if recup_usr and recup_email:
-                    with st.spinner("Buscando usuario y enviando correo..."):
+                    with st.spinner("Verificando credenciales..."):
                         consulta = supabase.table("usuarios").select("id").eq("usuario", recup_usr).eq("email", recup_email).execute()
                         
                         if consulta.data:
-                            # Generamos una clave al azar de 6 caracteres alfanuméricos
-                            letras_numeros = string.ascii_letters + string.digits
-                            clave_temporal = ''.join(random.choice(letras_numeros) for i in range(6))
-                            
-                            # Actualizamos la clave en Supabase
-                            supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("usuario", recup_usr).execute()
-                            
-                            # Enviamos el correo usando la nueva función TLS
-                            exito, mensaje_error = enviar_correo_recuperacion(recup_email, clave_temporal)
-                            
-                            if exito:
-                                st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
-                            else:
-                                st.error(f"❌ Detalles del error técnico: {mensaje_error}")
+                            # Generamos un pin de seguridad de 4 dígitos
+                            pin_seguridad = ''.join(random.choice(string.digits) for i in range(4))
+                            st.success("✅ Identidad verificada con éxito.")
+                            st.info(f"🔒 **Paso Final:**\n\nPor favor, envíanos un mensaje a nuestro WhatsApp (+54 9 261 XXX-XXXX) con este código de seguridad: **{pin_seguridad}**.\n\nAl recibirlo, te asignaremos inmediatamente tu nueva contraseña.")
                         else:
-                            st.error("❌ No encontramos ninguna cuenta con ese usuario y correo.")
+                            st.error("❌ Los datos no coinciden. Revisa tu usuario y correo.")
                 else:
                     st.warning("⚠️ Completa ambos campos.")
             
@@ -205,7 +160,6 @@ else:
     if st.session_state.rol_actual == "proveedor":
         st.title("📦 Panel de Control de Fábrica")
         
-        # Panel de administración de claves para clientes
         with st.expander("👥 Gestión de Clientes (Resetear Claves)", expanded=False):
             st.write("Aquí puedes forzar el cambio de contraseña si un revendedor la olvidó.")
             try:
@@ -228,7 +182,6 @@ else:
             except Exception as e:
                 st.error("Error al cargar la lista de clientes.")
 
-        # Formulario para subir calzados al catálogo
         with st.expander("➕ Cargar Nuevo Producto", expanded=False):
             with st.form("form_carga", clear_on_submit=True):
                 articulo = st.text_input("Artículo (Ej: Bota de Cuero)")
@@ -255,7 +208,7 @@ else:
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-    # VISTA: CATÁLOGO PÚBLICO (Visible para todos una vez logueados)
+    # VISTA: CATÁLOGO PÚBLICO
     st.write("---")
     st.title("👞 Catálogo Mayorista")
     
