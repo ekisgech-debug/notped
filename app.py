@@ -22,7 +22,7 @@ supabase: Client = init_connection()
 # --- FUNCIÓN DE CORREO BLINDADA ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     # PEGA AQUÍ LA URL QUE TE DIO GOOGLE APPS SCRIPT
-    url_google_script = "AQUI_PEGA_TU_URL_DE_LA_WEB_APP" 
+    url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
     
     payload = {
         "destinatario": destinatario, 
