@@ -6,6 +6,7 @@ from email.mime.text import MIMEText
 import random
 import string
 import uuid
+import requests
 
 # Configuración básica
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
@@ -20,12 +21,25 @@ supabase: Client = init_connection()
 
 # --- FUNCIÓN DE CORREO BLINDADA ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
-    remitente = "info_notped@gmail.com"
-    # IMPORTANTE: Esta debe ser la "Contraseña de Aplicación" de 16 letras de Google, configurada en Render.
-    password = os.environ.get("EMAIL_PASS") 
+    # PEGA AQUÍ LA URL QUE TE DIO GOOGLE APPS SCRIPT
+    url_google_script = "AQUI_PEGA_TU_URL_DE_LA_WEB_APP" 
     
-    if not password:
-        return False, "Falta configurar la variable EMAIL_PASS en Render."
+    payload = {
+        "destinatario": destinatario, 
+        "clave": nueva_clave
+    }
+    
+    try:
+        # Usamos timeout=10 para que NUNCA MÁS se quede colgado infinitamente
+        respuesta = requests.post(url_google_script, json=payload, timeout=10)
+        
+        if respuesta.status_code == 200 and respuesta.json().get("estado") == "ok":
+            return True, "OK"
+        else:
+            return False, "Error en el puente de Google Apps Script."
+    except Exception as e:
+        return False, f"Timeout o error de conexión: {str(e)}"
+        
 
     cuerpo = f"""Hola,
 
