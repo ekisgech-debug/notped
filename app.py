@@ -23,7 +23,6 @@ if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "Inicio"
 
-# --- FUNCIÓN DE EMAIL ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
     payload = {"destinatario": destinatario, "clave": nueva_clave}
@@ -134,7 +133,6 @@ else:
     # MOTOR 1: PANEL FÁBRICA
     # ----------------------------------------------------
     if st.session_state.rol_actual == "proveedor":
-        # Traer configuraciones personalizadas de la fábrica
         res_conf = supabase.table("configuraciones_fabrica").select("*").eq("proveedor", st.session_state.usuario_actual).execute()
         mis_configs = res_conf.data if res_conf.data else []
         mis_categorias = [c for c in mis_configs if c['tipo'] == 'categoria']
@@ -142,60 +140,54 @@ else:
         mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
 
         st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
-        
         tab_carga, tab_catalogo, tab_clientes = st.tabs(["➕ Cargar Calzado", "👞 Mi Catálogo", "👥 Mis Revendedores"])
         
         # PESTAÑA 1: CARGA DE CALZADO
         with tab_carga:
-            # --- SECCIÓN: ADMINISTRADOR DE LISTAS ---
             with st.expander("⚙️ Administrar mis Listas (Eliminar categorías, colores o curvas)"):
-                st.write("Haz clic en la '❌' para eliminar los elementos que ya no utilices.")
                 col_m1, col_m2, col_m3 = st.columns(3)
                 with col_m1:
-                    st.markdown("**Mis Categorías**")
+                    st.markdown("**Categorías**")
                     for c in mis_categorias:
-                        if st.button(f"❌ {c['nombre']}", key=f"del_{c['id']}"):
+                        if st.button(f"❌ {c['nombre']}", key=f"del_cat_{c['id']}"):
                             supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
                 with col_m2:
-                    st.markdown("**Mis Colores**")
+                    st.markdown("**Colores**")
                     for c in mis_colores:
-                        if st.button(f"❌ {c['nombre']}", key=f"del_{c['id']}"):
+                        if st.button(f"❌ {c['nombre']}", key=f"del_col_{c['id']}"):
                             supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
                 with col_m3:
-                    st.markdown("**Mis Curvas**")
+                    st.markdown("**Curvas**")
                     for c in mis_curvas:
-                        if st.button(f"❌ {c['nombre']}", key=f"del_{c['id']}"):
+                        if st.button(f"❌ {c['nombre']}", key=f"del_curv_{c['id']}"):
                             supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
 
             st.write("---")
             st.subheader("Nuevo Producto")
             
-            # --- FORMULARIO PRINCIPAL (SEPARADO PARA PERMITIR DINAMISMO) ---
             c_cat, c_col = st.columns(2)
             with c_cat:
-                opcion_cat = st.selectbox("Categoría", [c['nombre'] for c in mis_categorias] + ["➕ Agregar Nueva..."])
-                if opcion_cat == "➕ Agregar Nueva...":
-                    cat_final = st.text_input("Nombre de la nueva Categoría")
+                opcion_cat = st.selectbox("Categoría", ["➕ Crear Nueva..."] + [c['nombre'] for c in mis_categorias])
+                if opcion_cat == "➕ Crear Nueva...":
+                    cat_final = st.text_input("✍️ Escribe la nueva Categoría")
                 else: cat_final = opcion_cat
 
             with c_col:
-                opcion_col = st.selectbox("Color", [c['nombre'] for c in mis_colores] + ["➕ Agregar Nuevo..."])
-                if opcion_col == "➕ Agregar Nuevo...":
-                    col_final = st.text_input("Nombre del nuevo Color")
+                opcion_col = st.selectbox("Color", ["➕ Crear Nuevo..."] + [c['nombre'] for c in mis_colores])
+                if opcion_col == "➕ Crear Nuevo...":
+                    col_final = st.text_input("✍️ Escribe el nuevo Color")
                 else: col_final = opcion_col
 
             art = st.text_input("Artículo (Ej: Bota 401)")
             desc = st.text_input("Descripción detallada")
             
-            # --- LÓGICA DE CURVAS DINÁMICAS ---
             st.write("---")
-            st.write("**Grilla de Talles (Curva)**")
+            st.markdown("**📏 Configuración de Curva de Talles**")
             
-            curva_elegida = st.selectbox("Cargar curva guardada (Opcional)", ["-- Personalizada --"] + [c['nombre'] for c in mis_curvas])
+            curva_elegida = st.selectbox("Selecciona una Curva", ["➕ Armar Nueva Curva..."] + [c['nombre'] for c in mis_curvas])
             
-            # Valores por defecto para la grilla
             t_d_def, t_h_def, cantidades_def = 35, 40, []
-            if curva_elegida != "-- Personalizada --":
+            if curva_elegida != "➕ Armar Nueva Curva...":
                 obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
                 if obj:
                     partes = obj['valor'].split('|')
@@ -224,32 +216,33 @@ else:
                 st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
                 curva_final_str = ""
 
-            # --- ENVÍO DEL FORMULARIO ---
+            if curva_elegida == "➕ Armar Nueva Curva...":
+                nombre_nueva_curva = st.text_input("💾 Nombre para guardar esta curva en tu lista (Ej: Urbana Mujer)")
+                guardar_curva = True
+            else:
+                nombre_nueva_curva = curva_elegida
+                guardar_curva = False
+
             with st.form("form_guardar_prod"):
                 precio = st.number_input("Precio de Lista ($)", min_value=0.0)
-                foto = st.file_uploader("Subir Foto del Calzado", type=["jpg", "png", "jpeg"])
+                foto = st.file_uploader("Subir Foto del Calzado (Máx 250kb)", type=["jpg", "png", "jpeg"])
                 
-                st.write("---")
-                guardar_curva = st.checkbox("💾 Guardar esta distribución de talles como una nueva Curva para el futuro")
-                nombre_nueva_curva = st.text_input("Nombre para la curva (Solo si marcaste la casilla anterior)", placeholder="Ej: Ojotas Verano")
-
                 if st.form_submit_button("Guardar Producto en Catálogo"):
-                    if not art or not foto or curva_final_str == "" or not cat_final or not col_final:
+                    if foto and foto.size > 256000:  # 250kb aprox
+                        st.error("❌ La imagen es demasiado pesada. El límite es de 250kb.")
+                    elif not art or not foto or curva_final_str == "" or not cat_final or not col_final:
                         st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría o Color).")
                     else:
                         with st.spinner("Procesando..."):
                             try:
-                                # 1. Guardar nueva categoría/color si son nuevos
-                                if opcion_cat == "➕ Agregar Nueva..." and cat_final:
+                                if opcion_cat == "➕ Crear Nueva..." and cat_final:
                                     supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_final}).execute()
-                                if opcion_col == "➕ Agregar Nuevo..." and col_final:
+                                if opcion_col == "➕ Crear Nuevo..." and col_final:
                                     supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_final}).execute()
-                                # 2. Guardar curva si se solicitó
                                 if guardar_curva and nombre_nueva_curva:
                                     valor_curva = f"{t_desde}|{t_hasta}|{curva_final_str}"
                                     supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_nueva_curva, "valor": valor_curva}).execute()
 
-                                # 3. Subir foto y guardar producto
                                 extension = foto.name.split('.')[-1]
                                 nombre_archivo = f"{uuid.uuid4()}.{extension}"
                                 supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
@@ -274,7 +267,6 @@ else:
             
             if res_prod.data:
                 productos = res_prod.data
-                # Agrupamos extrayendo categorías únicas
                 categorias_presentes = sorted(list(set([p.get('categoria', 'General') for p in productos])))
                 
                 for cat_name in categorias_presentes:
@@ -297,7 +289,7 @@ else:
                                 if st.button("🗑️ Borrar", key=f"del_prod_{p['id']}", type="primary"):
                                     supabase.table("productos").delete().eq("id", p['id']).execute()
                                     st.rerun()
-                    st.write("---") # Divisor entre categorías
+                    st.write("---")
             else:
                 st.info("Aún no tienes productos en tu catálogo.")
 
