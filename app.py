@@ -113,14 +113,15 @@ if st.session_state.usuario_actual is None:
             unsafe_allow_html=True
         )
 
-    # --- VISTA: LOGIN NORMAL ---
+  # --- VISTA: LOGIN NORMAL ---
     elif st.session_state.seccion_publica == "Login":
         st.markdown("<h3 style='text-align: center;'>Ingresar a la Plataforma</h3>", unsafe_allow_html=True)
         col_login_center = st.columns([1, 2, 1])[1]
         with col_login_center:
             with st.form("login_form"):
                 usr_email = st.text_input("Correo Electrónico").strip().lower()
-                pwd = st.text_input("Contraseña", type="password")
+                # El .strip() aquí es VITAL para eliminar espacios en blanco al copiar y pegar desde Gmail
+                pwd = st.text_input("Contraseña", type="password").strip() 
                 submit = st.form_submit_button("Ingresar")
                 
                 if submit:
@@ -185,26 +186,27 @@ if st.session_state.usuario_actual is None:
                 if submit_recup:
                     if recup_email:
                         with st.spinner("Buscando cuenta..."):
-                            # 1. Verificamos que el correo exista en la base de datos
                             consulta = supabase.table("usuarios").select("id").eq("email", recup_email).execute()
                             
                             if consulta.data:
-                                # 2. Generamos clave y enviamos correo
                                 clave_temporal = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(6))
                                 exito, msj_error = enviar_correo_recuperacion(recup_email, clave_temporal)
                                 
                                 if exito:
-                                    # 3. Guardamos la nueva clave en Supabase
-                                    supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
-                                    st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
+                                    # Obligamos a Supabase a confirmarnos que actualizó el dato
+                                    res_update = supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
+                                    
+                                    if res_update.data:
+                                        st.success("✅ ¡Listo! Te enviamos la nueva clave. Revisa tu correo.")
+                                    else:
+                                        st.error("❌ Error interno: Supabase no permitió guardar la clave (Revisa tus reglas RLS).")
                                 else:
                                     st.error(f"❌ Error en el envío: {msj_error}")
                             else:
-                                st.error("❌ No encontramos ninguna cuenta registrada con este correo exacto.")
+                                st.error("❌ No encontramos ninguna cuenta registrada con este correo.")
                     else:
                         st.warning("⚠️ Ingresa un correo electrónico.")
             
-            # Botón para volver fácilmente al login
             if st.button("Volver al Inicio"):
                 st.session_state.seccion_publica = "Login"
                 st.rerun()
