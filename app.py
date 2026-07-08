@@ -6,7 +6,6 @@ import random
 import string
 import requests
 
-# Configuración básica de la página
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
 
 @st.cache_resource
@@ -17,242 +16,231 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- ESTADO DE SESIÓN PERSISTENTE ---
+# --- ESTADO DE SESIÓN ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
+if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "Inicio"
 
-# --- FUNCIÓN DE EMAIL (PUENTE GOOGLE APPS SCRIPT) ---
+# --- FUNCIÓN DE EMAIL ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
     payload = {"destinatario": destinatario, "clave": nueva_clave}
     try:
         respuesta = requests.post(url_google_script, json=payload, timeout=10)
-        if respuesta.status_code == 200 and respuesta.json().get("estado") == "ok":
-            return True, "OK"
+        if respuesta.status_code == 200 and respuesta.json().get("estado") == "ok": return True, "OK"
         return False, "Error en el script de Google"
-    except Exception as e:
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
 
 # ========================================================
-# FLUX 1: ENTORNO PÚBLICO (PORTADA + LOGIN / REGISTRO)
+# FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    
-    # --- MENÚ SUPERIOR DE NAVEGACIÓN PÚBLICA ---
     col_logo, col_nav = st.columns([2, 3])
-    with col_logo:
-        st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
+    with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
     with col_nav:
-        # Simulamos una barra de navegación con botones alineados a la derecha
         sub_col1, sub_col2, sub_col3 = st.columns(3)
         with sub_col1:
-            if st.button("🏠 Inicio / Portada", use_container_width=True):
-                st.session_state.seccion_publica = "Inicio"
-                st.rerun()
+            if st.button("🏠 Inicio", use_container_width=True): st.session_state.seccion_publica = "Inicio"; st.rerun()
         with sub_col2:
-            if st.button("🔐 Iniciar Sesión", use_container_width=True):
-                st.session_state.seccion_publica = "Login"
-                st.rerun()
+            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.session_state.seccion_publica = "Login"; st.rerun()
         with sub_col3:
-            if st.button("📝 Registrar mi Negocio", use_container_width=True):
-                st.session_state.seccion_publica = "Registro"
-                st.rerun()
+            if st.button("📝 Registrarse", use_container_width=True): st.session_state.seccion_publica = "Registro"; st.rerun()
     st.write("---")
 
-    # --- VISTA: PORTADA PRINCIPAL CON BANNERS ---
     if st.session_state.seccion_publica == "Inicio":
-        st.title("🚀 Conectamos Fábricas de Calzado con Revendedores de todo el País")
-        st.subheader("La plataforma mayorista más rápida y eficiente.")
-        
+        st.title("🚀 Conectamos Fábricas de Calzado con Revendedores")
         st.write("")
-        st.markdown("### 📢 Espacios Publicitarios Destacados")
-        
-        # Grid de Banners Publicitarios (Puedes reemplazar los contenedores por st.image cuando tengas los diseños)
-        col_banner1, col_banner2 = st.columns(2)
-        
-        with col_banner1:
-            st.markdown(
-                """
-                <div style='background-color: #f0f2f6; padding: 40px; border-radius: 10px; border-left: 8px solid #000; text-align: center;'>
-                    <h4>🏭 FÁBRICA DESTACADA A</h4>
-                    <p>Nueva Colección Primavera-Verano. Lanzamientos exclusivos y curvas completas.</p>
-                    <small style='color: gray;'>Espacio publicitario disponible</small>
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-            if st.button("Explorar Fábrica A", key="btn_pub_a"):
-                st.session_state.seccion_publica = "Login"
-                st.rerun()
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            st.info("🏭 **FÁBRICA DESTACADA A**\n\nNueva Colección Primavera-Verano. Lanzamientos exclusivos.")
+        with col_b2:
+            st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
 
-        with col_banner2:
-            st.markdown(
-                """
-                <div style='background-color: #f0f2f6; padding: 40px; border-radius: 10px; border-left: 8px solid #28a745; text-align: center;'>
-                    <h4>🏭 FÁBRICA DESTACADA B</h4>
-                    <p>Especialistas en Línea Urbana y Deportiva. Envíos inmediatos a todo el país.</p>
-                    <small style='color: gray;'>Espacio publicitario disponible</small>
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-            if st.button("Explorar Fábrica B", key="btn_pub_b"):
-                st.session_state.seccion_publica = "Login"
-                st.rerun()
-                
-        st.write("")
-        st.write("---")
-        st.markdown(
-            """
-            <div style='text-align: center; color: gray; padding: 20px;'>
-                ¿Eres fabricante y quieres anunciar aquí? Contáctanos a <b>info_notped@gmail.com</b>
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
-
-  # --- VISTA: LOGIN NORMAL ---
     elif st.session_state.seccion_publica == "Login":
-        st.markdown("<h3 style='text-align: center;'>Ingresar a la Plataforma</h3>", unsafe_allow_html=True)
-        col_login_center = st.columns([1, 2, 1])[1]
-        with col_login_center:
-            with st.form("login_form"):
-                usr_email = st.text_input("Correo Electrónico").strip().lower()
-                # El .strip() aquí es VITAL para eliminar espacios en blanco al copiar y pegar desde Gmail
-                pwd = st.text_input("Contraseña", type="password").strip() 
-                submit = st.form_submit_button("Ingresar")
-                
-                if submit:
-                    res = supabase.table("usuarios").select("*").eq("email", usr_email).eq("contrasena", pwd).execute()
+        col_login = st.columns([1, 2, 1])[1]
+        with col_login:
+            with st.form("login"):
+                st.subheader("Ingresar")
+                u_email = st.text_input("Correo").strip().lower()
+                pwd = st.text_input("Contraseña", type="password").strip()
+                if st.form_submit_button("Ingresar"):
+                    res = supabase.table("usuarios").select("*").eq("email", u_email).eq("contrasena", pwd).execute()
                     if res.data:
-                        datos = res.data[0]
-                        st.session_state.usuario_actual = datos["email"]
-                        st.session_state.rol_actual = datos["rol"]
+                        st.session_state.usuario_actual = res.data[0]["email"]
+                        st.session_state.rol_actual = res.data[0]["rol"]
+                        st.session_state.marca_actual = res.data[0]["nombre_marca"]
                         st.rerun()
-                    else:
-                        st.error("❌ Correo o contraseña incorrectos.")
-            
-            if st.button("¿Olvidaste tu contraseña?"):
-                st.session_state.seccion_publica = "Recuperar"
-                st.rerun()
+                    else: st.error("❌ Datos incorrectos.")
+            if st.button("¿Olvidaste tu contraseña?"): st.session_state.seccion_publica = "Recuperar"; st.rerun()
 
-    # --- VISTA: REGISTRO ---
     elif st.session_state.seccion_publica == "Registro":
-        st.markdown("<h3 style='text-align: center;'>Crea tu Cuenta Mayorista</h3>", unsafe_allow_html=True)
-        col_reg_center = st.columns([1, 2, 1])[1]
-        with col_reg_center:
-            with st.form("registro_form"):
-                tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
-                new_marca = st.text_input("Nombre de tu Negocio / Marca").strip()
-                new_email = st.text_input("Correo Electrónico").strip().lower()
-                new_pwd = st.text_input("Contraseña", type="password")
-                new_pwd_confirm = st.text_input("Confirmar Contraseña", type="password")
-                submit_reg = st.form_submit_button("Registrarse")
-                
-                if submit_reg:
-                    if new_marca and new_email and new_pwd and new_pwd_confirm:
-                        if new_pwd != new_pwd_confirm:
-                            st.error("❌ Las contraseñas no coinciden.")
-                        else:
-                            rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
-                            try:
-                                chequeo = supabase.table("usuarios").select("id").eq("email", new_email).execute()
-                                if chequeo.data:
-                                    st.error("❌ Este correo ya está registrado.")
-                                else:
-                                    supabase.table("usuarios").insert({
-                                        "email": new_email, "contrasena": new_pwd, 
-                                        "rol": rol_asignado, "nombre_marca": new_marca 
-                                    }).execute()
-                                    st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
-                                    st.session_state.seccion_publica = "Login"
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"Hubo un problema: {e}")
-                    else:
-                        st.warning("⚠️ Completa todos los campos.")
+        col_reg = st.columns([1, 2, 1])[1]
+        with col_reg:
+            with st.form("reg"):
+                st.subheader("Crear Cuenta")
+                tipo = st.selectbox("Tipo", ["Revendedor", "Fábrica"])
+                marca = st.text_input("Marca").strip()
+                email = st.text_input("Correo").strip().lower()
+                p1 = st.text_input("Clave", type="password")
+                p2 = st.text_input("Confirmar", type="password")
+                if st.form_submit_button("Registrarse"):
+                    if p1 == p2 and marca and email:
+                        rol = "proveedor" if tipo == "Fábrica" else "revendedor"
+                        chequeo = supabase.table("usuarios").select("id").eq("email", email).execute()
+                        if not chequeo.data:
+                            supabase.table("usuarios").insert({"email": email, "contrasena": p1, "rol": rol, "nombre_marca": marca}).execute()
+                            st.success("✅ Cuenta creada.")
+                        else: st.error("❌ Correo ya registrado.")
+                    else: st.warning("Revisa los datos.")
 
-# --- VISTA: RECUPERAR CLAVE ---
     elif st.session_state.seccion_publica == "Recuperar":
-        col_rec_center = st.columns([1, 2, 1])[1]
-        with col_rec_center:
-            with st.form("recuperar_form"):
-                st.subheader("Recuperar Contraseña")
-                recup_email = st.text_input("Correo Electrónico").strip().lower()
-                submit_recup = st.form_submit_button("Enviar nueva contraseña")
-                
-                if submit_recup:
-                    if recup_email:
-                        with st.spinner("Buscando cuenta..."):
-                            consulta = supabase.table("usuarios").select("id").eq("email", recup_email).execute()
-                            
-                            if consulta.data:
-                                clave_temporal = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(6))
-                                exito, msj_error = enviar_correo_recuperacion(recup_email, clave_temporal)
-                                
-                                if exito:
-                                    # Obligamos a Supabase a confirmarnos que actualizó el dato
-                                    res_update = supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
-                                    
-                                    if res_update.data:
-                                        st.success("✅ ¡Listo! Te enviamos la nueva clave. Revisa tu correo.")
-                                    else:
-                                        st.error("❌ Error interno: Supabase no permitió guardar la clave (Revisa tus reglas RLS).")
-                                else:
-                                    st.error(f"❌ Error en el envío: {msj_error}")
-                            else:
-                                st.error("❌ No encontramos ninguna cuenta registrada con este correo.")
-                    else:
-                        st.warning("⚠️ Ingresa un correo electrónico.")
-            
-            if st.button("Volver al Inicio"):
-                st.session_state.seccion_publica = "Login"
-                st.rerun()
-                
-
+        col_rec = st.columns([1, 2, 1])[1]
+        with col_rec:
+            with st.form("recup"):
+                st.subheader("Recuperar Clave")
+                email_recup = st.text_input("Correo").strip().lower()
+                if st.form_submit_button("Enviar"):
+                    res = supabase.table("usuarios").select("id").eq("email", email_recup).execute()
+                    if res.data:
+                        tmp = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(6))
+                        exito, _ = enviar_correo_recuperacion(email_recup, tmp)
+                        if exito:
+                            supabase.table("usuarios").update({"contrasena": tmp}).eq("email", email_recup).execute()
+                            st.success("✅ Correo enviado.")
+                        else: st.error("Error al enviar.")
+                    else: st.error("No existe la cuenta.")
 
 # ========================================================
-# FLUX 2: ENTORNO PRIVADO (USUARIO AUTENTICADO)
+# FLUX 2: ENTORNO PRIVADO
 # ========================================================
 else:
-    # --- BARRA LATERAL PRIVADA ---
     with st.sidebar:
-        st.markdown(f"### 👤 Conectado")
-        st.write(f"**Email:** {st.session_state.usuario_actual}")
+        st.markdown(f"### {st.session_state.marca_actual}")
+        st.write(f"*{st.session_state.usuario_actual}*")
         
-        # Etiquetas visuales claras por rol
-        if st.session_state.rol_actual == "super_admin":
-            st.info("👑 Súper Administrador")
-        elif st.session_state.rol_actual == "proveedor":
-            st.success("🏭 Panel Fábrica")
-        else:
-            st.warning("🛒 Panel Revendedor")
+        if st.session_state.rol_actual == "proveedor": st.success("🏭 Panel Fábrica")
+        elif st.session_state.rol_actual == "revendedor": st.warning("🛒 Panel Revendedor")
+        else: st.info("👑 Admin")
             
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+            st.session_state.clear(); st.rerun()
 
-    # --- ENRUTAMIENTO DE PANELES PRIVADOS ---
-    
-    # 1. TU TABLERO ÚNICO DE CONTROL (SUPER ADMIN)
-    if st.session_state.rol_actual == "super_admin":
-        st.title("⚙️ Tablero Maestro - NotPed Global")
-        st.subheader("Control absoluto del ecosistema")
+    # ----------------------------------------------------
+    # MOTOR 1: PANEL FÁBRICA
+    # ----------------------------------------------------
+    if st.session_state.rol_actual == "proveedor":
+        st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
         
-        # Aquí colocaremos el control de accesos, reset de claves maestro y la gestión de anuncios
-        st.info("Estructura base lista. Aquí verás la lista de usuarios, estados de cuenta y métricas del sistema.")
+        # Recreamos tus pestañas de GAS
+        tab_carga, tab_catalogo, tab_clientes = st.tabs(["➕ Cargar Calzado", "👞 Mi Catálogo", "👥 Mis Revendedores"])
+        
+        # PESTAÑA 1: CARGA DE CALZADO
+        with tab_carga:
+            st.subheader("Nuevo Producto")
+            
+            # Variables reactivas para la grilla de talles (Fuera del form para que se actualice en vivo)
+            col1, col2, col3 = st.columns(3)
+            with col1: cat = st.text_input("Categoría (Ej: Invierno, Colegial)")
+            with col2: art = st.text_input("Artículo (Ej: Bota 401)")
+            with col3: color = st.text_input("Color")
+            
+            desc = st.text_input("Descripción detallada")
+            
+            st.write("**Grilla de Talles (Curva)**")
+            col_d, col_h = st.columns(2)
+            with col_d: t_desde = st.number_input("Talle Desde", min_value=15, max_value=50, value=35)
+            with col_h: t_hasta = st.number_input("Talle Hasta", min_value=15, max_value=50, value=40)
+            
+            # MAGIA: Renderizamos la grilla dinámicamente como en tu JS
+            if t_hasta >= t_desde:
+                talles_list = list(range(t_desde, t_hasta + 1))
+                cols_talles = st.columns(len(talles_list))
+                valores_curva = []
+                total_pares = 0
+                
+                for i, talle in enumerate(talles_list):
+                    with cols_talles[i]:
+                        # Cada casillero suma a la curva
+                        val = st.number_input(f"T-{talle}", min_value=0, step=1, key=f"talle_{talle}")
+                        valores_curva.append(str(val))
+                        total_pares += val
+                
+                st.markdown(f"<p style='text-align: right; color: #d32f2f; font-weight: bold; font-size:18px;'>Total pares por caja: {total_pares}</p>", unsafe_allow_html=True)
+                curva_final_str = "-".join(valores_curva)
+            else:
+                st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
+                curva_final_str = ""
 
-    # 2. PANEL INDEPENDIENTE PARA LAS FÁBRICAS
-    elif st.session_state.rol_actual == "proveedor":
-        st.title("🏭 Centro de Control de Fábrica")
-        st.subheader("Gestiona tus productos y recibe pedidos de revendedores")
-        st.info("Estructura base lista. Aquí la fábrica podrá subir artículos, curvas de talles y procesar sus ventas.")
+            st.write("---")
+            # El formulario final para empaquetar y subir todo
+            with st.form("form_guardar_prod"):
+                precio = st.number_input("Precio de Lista ($)", min_value=0.0)
+                foto = st.file_uploader("Subir Foto del Calzado", type=["jpg", "png", "jpeg"])
+                
+                if st.form_submit_button("Guardar en mi Catálogo"):
+                    if not art or not foto or curva_final_str == "":
+                        st.warning("⚠️ Completa Artículo, foto y asegura que la curva sea válida.")
+                    else:
+                        with st.spinner("Subiendo foto y guardando..."):
+                            try:
+                                extension = foto.name.split('.')[-1]
+                                nombre_archivo = f"{uuid.uuid4()}.{extension}"
+                                supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
+                                foto_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
+                                
+                                nuevo_prod = {
+                                    "proveedor": st.session_state.usuario_actual,
+                                    "categoria": cat, "articulo": art, "color": color, 
+                                    "descripcion": desc, "precio": precio,
+                                    "talle_desde": t_desde, "talle_hasta": t_hasta,
+                                    "curva": curva_final_str, "foto_url": foto_url
+                                }
+                                supabase.table("productos").insert(nuevo_prod).execute()
+                                st.success("✅ ¡Producto cargado con éxito! Búscalo en 'Mi Catálogo'.")
+                            except Exception as e:
+                                st.error(f"Error al guardar: {e}")
 
-    # 3. PANEL INDEPENDIENTE PARA LOS REVENDEDORES
+        # PESTAÑA 2: CATÁLOGO
+        with tab_catalogo:
+            st.subheader("Artículos Publicados")
+            res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
+            
+            if res_prod.data:
+                for p in res_prod.data:
+                    with st.container(border=True):
+                        c1, c2, c3, c4 = st.columns([1, 2, 2, 1])
+                        with c1:
+                            if p.get("foto_url"): st.image(p["foto_url"], use_container_width=True)
+                        with c2:
+                            st.markdown(f"**{p['articulo']}** | {p.get('color', '')}")
+                            st.caption(p.get("categoria", "General"))
+                            st.write(p.get("descripcion", ""))
+                            st.markdown(f"<h4 style='color: #28a745;'>${p['precio']:,.0f}</h4>", unsafe_allow_html=True)
+                        with c3:
+                            st.write("**Curva de Talles:**")
+                            st.code(f"Talles: {p['talle_desde']} a {p['talle_hasta']}\nCantidades: {p['curva']}")
+                        with c4:
+                            if st.button("🗑️ Borrar", key=f"del_{p['id']}", type="primary"):
+                                supabase.table("productos").delete().eq("id", p['id']).execute()
+                                st.rerun()
+            else:
+                st.info("Aún no tienes productos en tu catálogo.")
+
+        # PESTAÑA 3: REVENDEDORES (CLIENTES)
+        with tab_clientes:
+            st.subheader("Mis Clientes Autorizados")
+            st.info("Próximamente: Aquí verás las notas de pedido que te envíen los revendedores, y podrás asignarles bonificaciones.")
+
+    # ----------------------------------------------------
+    # MOTOR 2 y 3 (Pendientes para el siguiente paso)
+    # ----------------------------------------------------
     elif st.session_state.rol_actual == "revendedor":
-        st.title("🛒 Plataforma Mayorista de Compras")
-        st.subheader("Explora catálogos y arma tus notas de pedido")
-        st.info("Estructura base lista. Aquí el cliente final podrá ver los productos de las marcas y cargar su carrito.")
+        st.title("🛒 Plataforma Mayorista")
+        st.info("El motor del revendedor estará aquí.")
+
+    elif st.session_state.rol_actual == "super_admin":
+        st.title("⚙️ Tablero Maestro")
+        st.info("Tu panel de control general.")
