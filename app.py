@@ -173,7 +173,7 @@ if st.session_state.usuario_actual is None:
                     else:
                         st.warning("⚠️ Completa todos los campos.")
 
-    # --- VISTA: RECUPERAR CLAVE ---
+# --- VISTA: RECUPERAR CLAVE ---
     elif st.session_state.seccion_publica == "Recuperar":
         col_rec_center = st.columns([1, 2, 1])[1]
         with col_rec_center:
@@ -184,15 +184,31 @@ if st.session_state.usuario_actual is None:
                 
                 if submit_recup:
                     if recup_email:
-                        with st.spinner("Procesando..."):
-                            consulta = supabase.table("usuarios").select("id").execute()
-                            clave_temporal = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(6))
-                            exito, msj_error = enviar_correo_recuperacion(recup_email, clave_temporal)
-                            if exito:
-                                supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
-                                st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
+                        with st.spinner("Buscando cuenta..."):
+                            # 1. Verificamos que el correo exista en la base de datos
+                            consulta = supabase.table("usuarios").select("id").eq("email", recup_email).execute()
+                            
+                            if consulta.data:
+                                # 2. Generamos clave y enviamos correo
+                                clave_temporal = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(6))
+                                exito, msj_error = enviar_correo_recuperacion(recup_email, clave_temporal)
+                                
+                                if exito:
+                                    # 3. Guardamos la nueva clave en Supabase
+                                    supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
+                                    st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
+                                else:
+                                    st.error(f"❌ Error en el envío: {msj_error}")
                             else:
-                                st.error(f"❌ Error en el envío: {msj_error}")
+                                st.error("❌ No encontramos ninguna cuenta registrada con este correo exacto.")
+                    else:
+                        st.warning("⚠️ Ingresa un correo electrónico.")
+            
+            # Botón para volver fácilmente al login
+            if st.button("Volver al Inicio"):
+                st.session_state.seccion_publica = "Login"
+                st.rerun()
+                
 
 
 # ========================================================
