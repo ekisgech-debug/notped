@@ -1,14 +1,12 @@
 import streamlit as st
 from supabase import create_client, Client
 import os
-import smtplib
-from email.mime.text import MIMEText
+import uuid
 import random
 import string
-import uuid
 import requests
 
-# Configuración básica
+# Configuración básica de la página
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
 
 @st.cache_resource
@@ -19,219 +17,224 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- FUNCIÓN DE CORREO BLINDADA ---
+# --- ESTADO DE SESIÓN PERSISTENTE ---
+if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
+if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
+if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "Inicio"
+
+# --- FUNCIÓN DE EMAIL (PUENTE GOOGLE APPS SCRIPT) ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
-    # PEGA AQUÍ LA URL QUE TE DIO GOOGLE APPS SCRIPT
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
-    
-    payload = {
-        "destinatario": destinatario, 
-        "clave": nueva_clave
-    }
-    
+    payload = {"destinatario": destinatario, "clave": nueva_clave}
     try:
-        # Usamos timeout=10 para que NUNCA MÁS se quede colgado infinitamente
         respuesta = requests.post(url_google_script, json=payload, timeout=10)
-        
         if respuesta.status_code == 200 and respuesta.json().get("estado") == "ok":
             return True, "OK"
-        else:
-            return False, "Error en el puente de Google Apps Script."
+        return False, "Error en el script de Google"
     except Exception as e:
-        return False, f"Timeout o error de conexión: {str(e)}"
-        
-
-    cuerpo = f"""Hola,
-
-Se ha solicitado un reseteo de contraseña para tu cuenta en NotPed.
-Tu nueva contraseña temporal es: {nueva_clave}
-
-Por favor, ingresa a la plataforma con esta clave y cámbiala desde tu panel lateral lo antes posible.
-
-Saludos,
-El equipo de NotPed"""
-
-    msg = MIMEText(cuerpo)
-    msg['Subject'] = 'Recuperación de Contraseña - NotPed'
-    msg['From'] = remitente
-    msg['To'] = destinatario
-    
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(remitente, password)
-        server.sendmail(remitente, destinatario, msg.as_string())
-        server.quit()
-        return True, "OK"
-    except Exception as e:
-        # Esto atrapará errores como el "[Errno 101] Network is unreachable" de Render
         return False, str(e)
 
-# --- ESTADO DE SESIÓN (Persistente para F5) ---
-if "email_actual" not in st.session_state: st.session_state.email_actual = None
-if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
-if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
-if "modo_registro" not in st.session_state: st.session_state.modo_registro = False
-if "modo_recuperar" not in st.session_state: st.session_state.modo_recuperar = False
 
-# --- PANTALLA DE INGRESO / REGISTRO / RECUPERACIÓN ---
-if st.session_state.email_actual is None:
-    st.title("Bienvenido a NotPed")
+# ========================================================
+# FLUX 1: ENTORNO PÚBLICO (PORTADA + LOGIN / REGISTRO)
+# ========================================================
+if st.session_state.usuario_actual is None:
     
-    # 1. VISTA: RECUPERAR CLAVE (POR EMAIL)
-    if st.session_state.modo_recuperar:
-        with st.form("recuperar_form"):
-            st.subheader("Recuperar Contraseña")
-            st.write("Ingresa tu correo y te enviaremos una clave temporal.")
+    # --- MENÚ SUPERIOR DE NAVEGACIÓN PÚBLICA ---
+    col_logo, col_nav = st.columns([2, 3])
+    with col_logo:
+        st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
+    with col_nav:
+        # Simulamos una barra de navegación con botones alineados a la derecha
+        sub_col1, sub_col2, sub_col3 = st.columns(3)
+        with sub_col1:
+            if st.button("🏠 Inicio / Portada", use_container_width=True):
+                st.session_state.seccion_publica = "Inicio"
+                st.rerun()
+        with sub_col2:
+            if st.button("🔐 Iniciar Sesión", use_container_width=True):
+                st.session_state.seccion_publica = "Login"
+                st.rerun()
+        with sub_col3:
+            if st.button("📝 Registrar mi Negocio", use_container_width=True):
+                st.session_state.seccion_publica = "Registro"
+                st.rerun()
+    st.write("---")
+
+    # --- VISTA: PORTADA PRINCIPAL CON BANNERS ---
+    if st.session_state.seccion_publica == "Inicio":
+        st.title("🚀 Conectamos Fábricas de Calzado con Revendedores de todo el País")
+        st.subheader("La plataforma mayorista más rápida y eficiente.")
+        
+        st.write("")
+        st.markdown("### 📢 Espacios Publicitarios Destacados")
+        
+        # Grid de Banners Publicitarios (Puedes reemplazar los contenedores por st.image cuando tengas los diseños)
+        col_banner1, col_banner2 = st.columns(2)
+        
+        with col_banner1:
+            st.markdown(
+                """
+                <div style='background-color: #f0f2f6; padding: 40px; border-radius: 10px; border-left: 8px solid #000; text-align: center;'>
+                    <h4>🏭 FÁBRICA DESTACADA A</h4>
+                    <p>Nueva Colección Primavera-Verano. Lanzamientos exclusivos y curvas completas.</p>
+                    <small style='color: gray;'>Espacio publicitario disponible</small>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+            if st.button("Explorar Fábrica A", key="btn_pub_a"):
+                st.session_state.seccion_publica = "Login"
+                st.rerun()
+
+        with col_banner2:
+            st.markdown(
+                """
+                <div style='background-color: #f0f2f6; padding: 40px; border-radius: 10px; border-left: 8px solid #28a745; text-align: center;'>
+                    <h4>🏭 FÁBRICA DESTACADA B</h4>
+                    <p>Especialistas en Línea Urbana y Deportiva. Envíos inmediatos a todo el país.</p>
+                    <small style='color: gray;'>Espacio publicitario disponible</small>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+            if st.button("Explorar Fábrica B", key="btn_pub_b"):
+                st.session_state.seccion_publica = "Login"
+                st.rerun()
+                
+        st.write("")
+        st.write("---")
+        st.markdown(
+            """
+            <div style='text-align: center; color: gray; padding: 20px;'>
+                ¿Eres fabricante y quieres anunciar aquí? Contáctanos a <b>info_notped@gmail.com</b>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+
+    # --- VISTA: LOGIN NORMAL ---
+    elif st.session_state.seccion_publica == "Login":
+        st.markdown("<h3 style='text-align: center;'>Ingresar a la Plataforma</h3>", unsafe_allow_html=True)
+        col_login_center = st.columns([1, 2, 1])[1]
+        with col_login_center:
+            with st.form("login_form"):
+                usr_email = st.text_input("Correo Electrónico").strip().lower()
+                pwd = st.text_input("Contraseña", type="password")
+                submit = st.form_submit_button("Ingresar")
+                
+                if submit:
+                    res = supabase.table("usuarios").select("*").eq("email", usr_email).eq("contrasena", pwd).execute()
+                    if res.data:
+                        datos = res.data[0]
+                        st.session_state.usuario_actual = datos["email"]
+                        st.session_state.rol_actual = datos["rol"]
+                        st.rerun()
+                    else:
+                        st.error("❌ Correo o contraseña incorrectos.")
             
-            recup_email = st.text_input("Correo Electrónico").strip().lower()
-            submit_recup = st.form_submit_button("Enviar nueva contraseña")
-            
-            if submit_recup:
-                if recup_email:
-                    with st.spinner("Buscando cuenta y enviando correo..."):
-                        consulta = supabase.table("usuarios").select("id").eq("email", recup_email).execute()
-                        
-                        if consulta.data:
+            if st.button("¿Olvidaste tu contraseña?"):
+                st.session_state.seccion_publica = "Recuperar"
+                st.rerun()
+
+    # --- VISTA: REGISTRO ---
+    elif st.session_state.seccion_publica == "Registro":
+        st.markdown("<h3 style='text-align: center;'>Crea tu Cuenta Mayorista</h3>", unsafe_allow_html=True)
+        col_reg_center = st.columns([1, 2, 1])[1]
+        with col_reg_center:
+            with st.form("registro_form"):
+                tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
+                new_marca = st.text_input("Nombre de tu Negocio / Marca").strip()
+                new_email = st.text_input("Correo Electrónico").strip().lower()
+                new_pwd = st.text_input("Contraseña", type="password")
+                new_pwd_confirm = st.text_input("Confirmar Contraseña", type="password")
+                submit_reg = st.form_submit_button("Registrarse")
+                
+                if submit_reg:
+                    if new_marca and new_email and new_pwd and new_pwd_confirm:
+                        if new_pwd != new_pwd_confirm:
+                            st.error("❌ Las contraseñas no coinciden.")
+                        else:
+                            rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
+                            try:
+                                chequeo = supabase.table("usuarios").select("id").eq("email", new_email).execute()
+                                if chequeo.data:
+                                    st.error("❌ Este correo ya está registrado.")
+                                else:
+                                    supabase.table("usuarios").insert({
+                                        "email": new_email, "contrasena": new_pwd, 
+                                        "rol": rol_asignado, "nombre_marca": new_marca 
+                                    }).execute()
+                                    st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
+                                    st.session_state.seccion_publica = "Login"
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Hubo un problema: {e}")
+                    else:
+                        st.warning("⚠️ Completa todos los campos.")
+
+    # --- VISTA: RECUPERAR CLAVE ---
+    elif st.session_state.seccion_publica == "Recuperar":
+        col_rec_center = st.columns([1, 2, 1])[1]
+        with col_rec_center:
+            with st.form("recuperar_form"):
+                st.subheader("Recuperar Contraseña")
+                recup_email = st.text_input("Correo Electrónico").strip().lower()
+                submit_recup = st.form_submit_button("Enviar nueva contraseña")
+                
+                if submit_recup:
+                    if recup_email:
+                        with st.spinner("Procesando..."):
+                            consulta = supabase.table("usuarios").select("id").execute()
                             clave_temporal = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(6))
-                            
-                            # Intentamos enviar el correo PRIMERO, antes de cambiar la clave en la BD
                             exito, msj_error = enviar_correo_recuperacion(recup_email, clave_temporal)
-                            
                             if exito:
                                 supabase.table("usuarios").update({"contrasena": clave_temporal}).eq("email", recup_email).execute()
                                 st.success("✅ Te hemos enviado un correo con tu nueva contraseña temporal.")
                             else:
-                                st.error(f"❌ Falló el envío del correo. Error técnico del servidor: {msj_error}")
-                        else:
-                            st.error("❌ No encontramos ninguna cuenta con ese correo electrónico.")
-                else:
-                    st.warning("⚠️ Ingresa un correo electrónico.")
-            
-        if st.button("Volver al Inicio"):
-            st.session_state.modo_recuperar = False
-            st.rerun()
-                
-    # 2. VISTA: REGISTRARSE (CON EMAIL)
-    elif st.session_state.modo_registro:
-        with st.form("registro_form"):
-            st.subheader("Crear Cuenta Nueva")
-            
-            tipo_cuenta = st.selectbox("¿Qué tipo de cuenta necesitas?", ["Revendedor (Quiero comprar)", "Fábrica/Proveedor (Quiero vender)"])
-            new_marca = st.text_input("Nombre de tu Negocio / Marca").strip()
-            new_email = st.text_input("Correo Electrónico").strip().lower()
-            new_pwd = st.text_input("Contraseña", type="password")
-            new_pwd_confirm = st.text_input("Confirmar Contraseña", type="password")
-            
-            submit_reg = st.form_submit_button("Registrarse")
-            
-            if submit_reg:
-                if new_marca and new_email and new_pwd and new_pwd_confirm:
-                    if new_pwd != new_pwd_confirm:
-                        st.error("❌ Las contraseñas no coinciden.")
-                    else:
-                        rol_asignado = "proveedor" if "Fábrica" in tipo_cuenta else "revendedor"
-                        try:
-                            chequeo = supabase.table("usuarios").select("id").eq("email", new_email).execute()
-                            if chequeo.data:
-                                st.error("❌ Este correo ya está registrado.")
-                            else:
-                                nuevo_user = {
-                                    "email": new_email,
-                                    "contrasena": new_pwd, 
-                                    "rol": rol_asignado, 
-                                    "nombre_marca": new_marca 
-                                }
-                                supabase.table("usuarios").insert(nuevo_user).execute()
-                                st.success("✅ Cuenta creada con éxito. Ya puedes iniciar sesión.")
-                                st.session_state.modo_registro = False
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Hubo un problema: {e}")
-                else:
-                    st.warning("⚠️ Completa todos los campos.")
-        
-        if st.button("Volver al Login"):
-            st.session_state.modo_registro = False
-            st.rerun()
-            
-    # 3. VISTA: LOGIN NORMAL (CON EMAIL)
-    else:
-        with st.form("login_form"):
-            st.subheader("Iniciar Sesión")
-            usr_email = st.text_input("Correo Electrónico").strip().lower()
-            pwd = st.text_input("Contraseña", type="password")
-            submit = st.form_submit_button("Ingresar")
-            
-            if submit:
-                res = supabase.table("usuarios").select("*").eq("email", usr_email).eq("contrasena", pwd).execute()
-                if res.data:
-                    datos = res.data[0]
-                    st.session_state.email_actual = datos["email"]
-                    st.session_state.rol_actual = datos["rol"]
-                    st.session_state.marca_actual = datos["nombre_marca"]
-                    st.rerun()
-                else:
-                    st.error("❌ Correo o contraseña incorrectos.")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("¿No tienes cuenta? Regístrate"):
-                st.session_state.modo_registro = True
-                st.rerun()
-        with col2:
-            if st.button("¿Olvidaste tu contraseña?"):
-                st.session_state.modo_recuperar = True
-                st.rerun()
+                                st.error(f"❌ Error en el envío: {msj_error}")
 
-# --- SISTEMA PRINCIPAL (USUARIO CONECTADO) ---
+
+# ========================================================
+# FLUX 2: ENTORNO PRIVADO (USUARIO AUTENTICADO)
+# ========================================================
 else:
+    # --- BARRA LATERAL PRIVADA ---
     with st.sidebar:
-        st.markdown(f"### {st.session_state.marca_actual}")
-        st.write(f"*{st.session_state.email_actual}*")
+        st.markdown(f"### 👤 Conectado")
+        st.write(f"**Email:** {st.session_state.usuario_actual}")
         
+        # Etiquetas visuales claras por rol
         if st.session_state.rol_actual == "super_admin":
             st.info("👑 Súper Administrador")
         elif st.session_state.rol_actual == "proveedor":
-            st.success("🏭 Fábrica / Proveedor")
+            st.success("🏭 Panel Fábrica")
         else:
-            st.warning("🛒 Revendedor")
-        
+            st.warning("🛒 Panel Revendedor")
+            
         st.write("---")
-        with st.expander("🔐 Cambiar mi Contraseña"):
-            with st.form("form_cambio_clave", clear_on_submit=True):
-                clave_actual = st.text_input("Contraseña Actual", type="password")
-                clave_nueva = st.text_input("Nueva Contraseña", type="password")
-                clave_confirmar = st.text_input("Confirmar Nueva", type="password")
-                if st.form_submit_button("Actualizar"):
-                    consulta = supabase.table("usuarios").select("contrasena").eq("email", st.session_state.email_actual).execute()
-                    if consulta.data and consulta.data[0]["contrasena"] == clave_actual:
-                        if clave_nueva == clave_confirmar:
-                            supabase.table("usuarios").update({"contrasena": clave_nueva}).eq("email", st.session_state.email_actual).execute()
-                            st.success("✅ Contraseña actualizada.")
-                        else:
-                            st.error("❌ Las nuevas contraseñas no coinciden.")
-                    else:
-                        st.error("❌ La contraseña actual es incorrecta.")
-        
-        st.write("---")
-        if st.button("Cerrar Sesión"):
+        if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.clear()
             st.rerun()
-            
 
-    # --- PANELES SEGÚN ROL ---
+    # --- ENRUTAMIENTO DE PANELES PRIVADOS ---
+    
+    # 1. TU TABLERO ÚNICO DE CONTROL (SUPER ADMIN)
     if st.session_state.rol_actual == "super_admin":
-        st.title("⚙️ Tablero Maestro - NotPed")
-        st.write("Panel exclusivo de administración de la plataforma.")
-        # Aquí irá tu panel de métricas y comparativos luego.
+        st.title("⚙️ Tablero Maestro - NotPed Global")
+        st.subheader("Control absoluto del ecosistema")
+        
+        # Aquí colocaremos el control de accesos, reset de claves maestro y la gestión de anuncios
+        st.info("Estructura base lista. Aquí verás la lista de usuarios, estados de cuenta y métricas del sistema.")
 
+    # 2. PANEL INDEPENDIENTE PARA LAS FÁBRICAS
     elif st.session_state.rol_actual == "proveedor":
-        st.title("📦 Mi Fábrica")
-        # Tu formulario de carga de productos iría aquí
-        st.info("Espacio para el catálogo de la fábrica.")
+        st.title("🏭 Centro de Control de Fábrica")
+        st.subheader("Gestiona tus productos y recibe pedidos de revendedores")
+        st.info("Estructura base lista. Aquí la fábrica podrá subir artículos, curvas de talles y procesar sus ventas.")
 
+    # 3. PANEL INDEPENDIENTE PARA LOS REVENDEDORES
     elif st.session_state.rol_actual == "revendedor":
-        st.title("👞 Plataforma Mayorista")
-        # El selector de fábricas para armar las Notas de Pedido iría aquí
-        st.info("Espacio para que el revendedor vea productos y haga pedidos.")
+        st.title("🛒 Plataforma Mayorista de Compras")
+        st.subheader("Explora catálogos y arma tus notas de pedido")
+        st.info("Estructura base lista. Aquí el cliente final podrá ver los productos de las marcas y cargar su carrito.")
