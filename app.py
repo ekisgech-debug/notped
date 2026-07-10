@@ -7,17 +7,7 @@ import string
 import requests
 import time
 
-st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
-
-@st.cache_resourceimport streamlit as st
-from supabase import create_client, Client
-import os
-import uuid
-import random
-import string
-import requests
-import time
-
+# Configuración de página
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
 
 @st.cache_resource
