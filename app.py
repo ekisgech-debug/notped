@@ -10,6 +10,14 @@ import time
 # Configuración de página
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
 
+# Magia CSS para ocultar el "200MB per file" del uploader de Streamlit
+st.markdown("""
+    <style>
+        [data-testid="stFileUploader"] small {display: none !important;}
+        [data-testid="stFileUploaderDropzoneInstructions"] > div > span {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 @st.cache_resource
 def init_connection():
     url = os.environ.get("SUPABASE_URL")
@@ -22,9 +30,9 @@ supabase: Client = init_connection()
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
-if "form_key" not in st.session_state: st.session_state.form_key = 0 # Llave maestra para limpiar el formulario
+if "form_key" not in st.session_state: st.session_state.form_key = 0 
 
-fk = st.session_state.form_key # Atajo para las llaves de los widgets
+fk = st.session_state.form_key 
 
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
@@ -37,7 +45,7 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
 
 
 # ========================================================
-# FLUX 1: ENTORNO PÚBLICO (Manejo con Flecha Atrás)
+# FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
     ruta_publica = st.query_params.get("sec", "inicio")
@@ -180,7 +188,6 @@ else:
             st.write("---")
             st.subheader("Nuevo Producto")
             
-            # --- LÓGICA DE REEMPLAZO MÁGICO PARA CATEGORÍA ---
             c_cat, c_col = st.columns(2)
             with c_cat:
                 if st.session_state.get(f"crear_cat_{fk}", False):
@@ -202,7 +209,6 @@ else:
                     cat_final = opcion_cat if opcion_cat != "-- Elegir --" else ""
                     es_nueva_cat = False
 
-            # --- LÓGICA DE REEMPLAZO MÁGICO PARA COLOR ---
             with c_col:
                 if st.session_state.get(f"crear_col_{fk}", False):
                     col_input, col_btn = st.columns([8, 1])
@@ -229,60 +235,69 @@ else:
             st.write("---")
             st.markdown("**📏 Configuración de Curva de Talles**")
             
-            # --- LÓGICA DE REEMPLAZO MÁGICO PARA CURVAS ---
-            if st.session_state.get(f"crear_curva_{fk}", False):
-                col_input, col_btn = st.columns([8, 1])
-                with col_input:
-                    nombre_nueva_curva = st.text_input("Nombre de la Nueva Curva", placeholder="Ej: Urbana Mujer", key=f"txt_ncurv_{fk}").strip()
-                with col_btn:
-                    st.write("&nbsp;")
-                    if st.button("🔙", key=f"b_curv_{fk}", help="Volver a la lista"):
-                        st.session_state[f"crear_curva_{fk}"] = False
-                        st.rerun()
-                es_nueva_curva = True
-                t_d_def, t_h_def, cantidades_def = 35, 40, []
-            else:
-                opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_curvas]
-                curva_elegida = st.selectbox("Curva de Talles", opciones, key=f"sel_curv_{fk}")
-                if curva_elegida == "➕ Crear Nueva...":
-                    st.session_state[f"crear_curva_{fk}"] = True
-                    st.rerun()
-                
-                if curva_elegida != "-- Elegir --" and curva_elegida != "➕ Crear Nueva...":
-                    obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
-                    if obj:
-                        partes = obj['valor'].split('|')
-                        t_d_def, t_h_def = int(partes[0]), int(partes[1])
-                        cantidades_def = partes[2].split('-')
-                    nombre_nueva_curva = curva_elegida
-                    es_nueva_curva = False
-                else:
-                    t_d_def, t_h_def, cantidades_def = 35, 40, []
-                    nombre_nueva_curva = ""
-                    es_nueva_curva = False
-
-            # DIBUJO DE LA GRILLA (Se mantiene siempre visible)
-            col_d, col_h = st.columns(2)
-            with col_d: t_desde = st.number_input("Talle Desde", min_value=15, max_value=50, value=t_d_def, key=f"num_td_{fk}")
-            with col_h: t_hasta = st.number_input("Talle Hasta", min_value=15, max_value=50, value=t_h_def, key=f"num_th_{fk}")
+            # --- NUEVA OPCIÓN: SIN CURVA ---
+            sin_curva = st.checkbox("🚫 Producto sin curva de talles (N/A / Venta por unidad)", key=f"chk_sin_curva_{fk}")
             
-            if t_hasta >= t_desde:
-                talles_list = list(range(t_desde, t_hasta + 1))
-                cols_talles = st.columns(len(talles_list))
-                valores_curva, total_pares = [], 0
-                
-                for i, talle in enumerate(talles_list):
-                    val_defecto = int(cantidades_def[i]) if len(cantidades_def) > i else 0
-                    with cols_talles[i]:
-                        val = st.number_input(f"T-{talle}", min_value=0, step=1, value=val_defecto, key=f"talle_{talle}_{fk}")
-                        valores_curva.append(str(val))
-                        total_pares += val
-                
-                st.markdown(f"<p style='text-align: right; color: #d32f2f; font-weight: bold; font-size:18px;'>Total pares por caja: {total_pares}</p>", unsafe_allow_html=True)
-                curva_final_str = "-".join(valores_curva)
+            if sin_curva:
+                st.info("📌 Este producto se guardará sin numeración específica.")
+                t_desde = 0
+                t_hasta = 0
+                curva_final_str = "N/A"
+                es_nueva_curva = False
+                nombre_nueva_curva = ""
             else:
-                st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
-                curva_final_str = ""
+                if st.session_state.get(f"crear_curva_{fk}", False):
+                    col_input, col_btn = st.columns([8, 1])
+                    with col_input:
+                        nombre_nueva_curva = st.text_input("Nombre de la Nueva Curva", placeholder="Ej: Urbana Mujer", key=f"txt_ncurv_{fk}").strip()
+                    with col_btn:
+                        st.write("&nbsp;")
+                        if st.button("🔙", key=f"b_curv_{fk}", help="Volver a la lista"):
+                            st.session_state[f"crear_curva_{fk}"] = False
+                            st.rerun()
+                    es_nueva_curva = True
+                    t_d_def, t_h_def, cantidades_def = 35, 40, []
+                else:
+                    opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_curvas]
+                    curva_elegida = st.selectbox("Curva de Talles", opciones, key=f"sel_curv_{fk}")
+                    if curva_elegida == "➕ Crear Nueva...":
+                        st.session_state[f"crear_curva_{fk}"] = True
+                        st.rerun()
+                    
+                    if curva_elegida != "-- Elegir --" and curva_elegida != "➕ Crear Nueva...":
+                        obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
+                        if obj:
+                            partes = obj['valor'].split('|')
+                            t_d_def, t_h_def = int(partes[0]), int(partes[1])
+                            cantidades_def = partes[2].split('-')
+                        nombre_nueva_curva = curva_elegida
+                        es_nueva_curva = False
+                    else:
+                        t_d_def, t_h_def, cantidades_def = 35, 40, []
+                        nombre_nueva_curva = ""
+                        es_nueva_curva = False
+
+                col_d, col_h = st.columns(2)
+                with col_d: t_desde = st.number_input("Talle Desde", min_value=15, max_value=50, value=t_d_def, key=f"num_td_{fk}")
+                with col_h: t_hasta = st.number_input("Talle Hasta", min_value=15, max_value=50, value=t_h_def, key=f"num_th_{fk}")
+                
+                if t_hasta >= t_desde:
+                    talles_list = list(range(t_desde, t_hasta + 1))
+                    cols_talles = st.columns(len(talles_list))
+                    valores_curva, total_pares = [], 0
+                    
+                    for i, talle in enumerate(talles_list):
+                        val_defecto = int(cantidades_def[i]) if len(cantidades_def) > i else 0
+                        with cols_talles[i]:
+                            val = st.number_input(f"T-{talle}", min_value=0, step=1, value=val_defecto, key=f"talle_{talle}_{fk}")
+                            valores_curva.append(str(val))
+                            total_pares += val
+                    
+                    st.markdown(f"<p style='text-align: right; color: #d32f2f; font-weight: bold; font-size:18px;'>Total pares por caja: {total_pares}</p>", unsafe_allow_html=True)
+                    curva_final_str = "-".join(valores_curva)
+                else:
+                    st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
+                    curva_final_str = ""
 
             st.write("---")
             precio = st.number_input("Precio de Lista ($)", min_value=0.0, key=f"num_precio_{fk}")
@@ -291,21 +306,19 @@ else:
             if st.button("Guardar Producto en Catálogo", type="primary", use_container_width=True):
                 if foto and foto.size > 256000:
                     st.error("❌ La imagen es demasiado pesada. El límite es de 250kb.")
-                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final or (es_nueva_curva and not nombre_nueva_curva):
+                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final or (not sin_curva and es_nueva_curva and not nombre_nueva_curva):
                     st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría, Color o Nombre de Curva).")
                 else:
                     with st.spinner("Procesando y guardando..."):
                         try:
-                            # Guardar en base de datos de configuraciones si son nuevas
                             if es_nueva_cat:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_final}).execute()
                             if es_nuevo_col:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_final}).execute()
-                            if es_nueva_curva:
+                            if es_nueva_curva and not sin_curva:
                                 valor_curva = f"{t_desde}|{t_hasta}|{curva_final_str}"
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_nueva_curva, "valor": valor_curva}).execute()
 
-                            # Subir foto y guardar producto
                             extension = foto.name.split('.')[-1]
                             nombre_archivo = f"{uuid.uuid4()}.{extension}"
                             supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
@@ -320,10 +333,11 @@ else:
                             }
                             supabase.table("productos").insert(nuevo_prod).execute()
                             
-                            # Magia de Reseteo
+                            # Magia de Reseteo y Redirección
                             st.session_state.form_key += 1
-                            st.success("✅ ¡Producto cargado con éxito! Formulario listo para el siguiente.")
-                            time.sleep(1.5)
+                            st.success("✅ ¡Producto cargado con éxito! Redirigiendo al catálogo...")
+                            time.sleep(1.2)
+                            st.query_params["panel"] = "catalogo"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
@@ -351,8 +365,12 @@ else:
                                 st.write(p.get("descripcion", ""))
                                 st.markdown(f"<h4 style='color: #28a745;'>${p['precio']:,.0f}</h4>", unsafe_allow_html=True)
                             with c3:
-                                st.write("**Curva de Talles:**")
-                                st.code(f"Talles: {p['talle_desde']} a {p['talle_hasta']}\nCantidades: {p['curva']}")
+                                if p.get("curva") == "N/A":
+                                    st.write("**Curva de Talles:**")
+                                    st.code("N/A - Sin Curva Específica")
+                                else:
+                                    st.write("**Curva de Talles:**")
+                                    st.code(f"Talles: {p['talle_desde']} a {p['talle_hasta']}\nCantidades: {p['curva']}")
                             with c4:
                                 if st.button("🗑️ Borrar", key=f"del_prod_{p['id']}", type="primary"):
                                     supabase.table("productos").delete().eq("id", p['id']).execute()
