@@ -26,14 +26,16 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- ESTADO DE SESIÓN Y LLAVES DE RESETEO ---
+# --- ESTADO DE SESIÓN ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "form_key" not in st.session_state: st.session_state.form_key = 0 
+if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "inicio"
 
 fk = st.session_state.form_key 
 
+# --- FUNCIONES AUXILIARES ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
     payload = {"destinatario": destinatario, "clave": nueva_clave}
@@ -43,33 +45,54 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
         return False, "Error en el script de Google"
     except Exception as e: return False, str(e)
 
+def generar_lista_talles(tipo, d, h):
+    if tipo == "Sin Curva (N/A)": return []
+    elif tipo == "Numérica Simple":
+        return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
+    elif tipo == "Doble Par (Ej: 34/35)":
+        lista = ["34/35", "36/37", "38/39", "40/41", "42/43", "44/45", "46/47"]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    elif tipo == "Doble Impar (Ej: 35/36)":
+        lista = ["35/36", "37/38", "39/40", "41/42", "43/44", "45/46", "47/48"]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    elif tipo == "Alfabética (XS, S...)":
+        lista = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    return []
 
 # ========================================================
-# FLUX 1: ENTORNO PÚBLICO
+# FLUX 1: ENTORNO PÚBLICO (URL LIMPIA GARANTIZADA)
 # ========================================================
 if st.session_state.usuario_actual is None:
-    ruta_publica = st.query_params.get("sec", "inicio")
+    # 🧹 Destruimos cualquier parámetro en la URL para que siempre se vea limpia
+    st.query_params.clear()
     
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
     with col_nav:
         sub_col1, sub_col2, sub_col3 = st.columns(3)
         with sub_col1:
-            if st.button("🏠 Inicio", use_container_width=True): st.query_params["sec"] = "inicio"; st.rerun()
+            if st.button("🏠 Inicio", use_container_width=True): st.session_state.seccion_publica = "inicio"; st.rerun()
         with sub_col2:
-            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.query_params["sec"] = "login"; st.rerun()
+            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.session_state.seccion_publica = "login"; st.rerun()
         with sub_col3:
-            if st.button("📝 Registrarse", use_container_width=True): st.query_params["sec"] = "registro"; st.rerun()
+            if st.button("📝 Registrarse", use_container_width=True): st.session_state.seccion_publica = "registro"; st.rerun()
     st.write("---")
 
-    if ruta_publica == "inicio":
+    if st.session_state.seccion_publica == "inicio":
         st.title("🚀 Conectamos Fábricas de Calzado con Revendedores")
         st.write("")
         col_b1, col_b2 = st.columns(2)
         with col_b1: st.info("🏭 **FÁBRICA DESTACADA A**\n\nNueva Colección Primavera-Verano. Lanzamientos exclusivos.")
         with col_b2: st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
 
-    elif ruta_publica == "login":
+    elif st.session_state.seccion_publica == "login":
         col_login = st.columns([1, 2, 1])[1]
         with col_login:
             with st.form("login"):
@@ -82,12 +105,13 @@ if st.session_state.usuario_actual is None:
                         st.session_state.usuario_actual = res.data[0]["email"]
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
+                        # Inyectamos el parámetro solo cuando ya está logueado
                         st.query_params["panel"] = "carga"
                         st.rerun()
                     else: st.error("❌ Datos incorrectos.")
-            if st.button("¿Olvidaste tu contraseña?"): st.query_params["sec"] = "recuperar"; st.rerun()
+            if st.button("¿Olvidaste tu contraseña?"): st.session_state.seccion_publica = "recuperar"; st.rerun()
 
-    elif ruta_publica == "registro":
+    elif st.session_state.seccion_publica == "registro":
         col_reg = st.columns([1, 2, 1])[1]
         with col_reg:
             with st.form("reg"):
@@ -105,12 +129,12 @@ if st.session_state.usuario_actual is None:
                             supabase.table("usuarios").insert({"email": email, "contrasena": p1, "rol": rol, "nombre_marca": marca}).execute()
                             st.success("✅ Cuenta creada. Redirigiendo al inicio de sesión...")
                             time.sleep(1.5)
-                            st.query_params["sec"] = "login"
+                            st.session_state.seccion_publica = "login"
                             st.rerun()
                         else: st.error("❌ Correo ya registrado.")
                     else: st.warning("Revisa los datos.")
 
-    elif ruta_publica == "recuperar":
+    elif st.session_state.seccion_publica == "recuperar":
         col_rec = st.columns([1, 2, 1])[1]
         with col_rec:
             with st.form("recup"):
@@ -150,7 +174,7 @@ else:
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.clear()
-            st.query_params["sec"] = "inicio"
+            st.query_params.clear()
             st.rerun()
 
     # ----------------------------------------------------
@@ -192,40 +216,30 @@ else:
             with c_cat:
                 if st.session_state.get(f"crear_cat_{fk}", False):
                     col_input, col_btn = st.columns([8, 1])
-                    with col_input:
-                        cat_final = st.text_input("Categoría", placeholder="Ingresá la nueva categoría...", key=f"txt_cat_{fk}").strip()
+                    with col_input: cat_final = st.text_input("Categoría", placeholder="Ingresá la nueva categoría...", key=f"txt_cat_{fk}").strip()
                     with col_btn:
                         st.write("&nbsp;")
-                        if st.button("🔙", key=f"b_cat_{fk}", help="Volver a la lista"):
-                            st.session_state[f"crear_cat_{fk}"] = False
-                            st.rerun()
+                        if st.button("🔙", key=f"b_cat_{fk}"): st.session_state[f"crear_cat_{fk}"] = False; st.rerun()
                     es_nueva_cat = True
                 else:
                     opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_categorias]
                     opcion_cat = st.selectbox("Categoría", opciones, key=f"sel_cat_{fk}")
-                    if opcion_cat == "➕ Crear Nueva...":
-                        st.session_state[f"crear_cat_{fk}"] = True
-                        st.rerun()
+                    if opcion_cat == "➕ Crear Nueva...": st.session_state[f"crear_cat_{fk}"] = True; st.rerun()
                     cat_final = opcion_cat if opcion_cat != "-- Elegir --" else ""
                     es_nueva_cat = False
 
             with c_col:
                 if st.session_state.get(f"crear_col_{fk}", False):
                     col_input, col_btn = st.columns([8, 1])
-                    with col_input:
-                        col_final = st.text_input("Color", placeholder="Ingresá el nuevo color...", key=f"txt_col_{fk}").strip()
+                    with col_input: col_final = st.text_input("Color", placeholder="Ingresá el nuevo color...", key=f"txt_col_{fk}").strip()
                     with col_btn:
                         st.write("&nbsp;")
-                        if st.button("🔙", key=f"b_col_{fk}", help="Volver a la lista"):
-                            st.session_state[f"crear_col_{fk}"] = False
-                            st.rerun()
+                        if st.button("🔙", key=f"b_col_{fk}"): st.session_state[f"crear_col_{fk}"] = False; st.rerun()
                     es_nuevo_col = True
                 else:
                     opciones = ["-- Elegir --", "➕ Crear Nuevo..."] + [c['nombre'] for c in mis_colores]
                     opcion_col = st.selectbox("Color", opciones, key=f"sel_col_{fk}")
-                    if opcion_col == "➕ Crear Nuevo...":
-                        st.session_state[f"crear_col_{fk}"] = True
-                        st.rerun()
+                    if opcion_col == "➕ Crear Nuevo...": st.session_state[f"crear_col_{fk}"] = True; st.rerun()
                     col_final = opcion_col if opcion_col != "-- Elegir --" else ""
                     es_nuevo_col = False
 
@@ -235,79 +249,87 @@ else:
             st.write("---")
             st.markdown("**📏 Configuración de Curva de Talles**")
             
-            # --- NUEVA OPCIÓN: SIN CURVA ---
-            sin_curva = st.checkbox("🚫 Producto sin curva de talles (N/A / Venta por unidad)", key=f"chk_sin_curva_{fk}")
+            # --- SUPER SELECTOR DE CURVAS ---
+            curva_elegida = st.selectbox("Selecciona una Curva Guardada o crea una nueva", ["➕ Armar Nueva Curva..."] + [c['nombre'] for c in mis_curvas], key=f"sel_curv_{fk}")
             
-            if sin_curva:
-                st.info("📌 Este producto se guardará sin numeración específica.")
-                t_desde = 0
-                t_hasta = 0
-                curva_final_str = "N/A"
-                es_nueva_curva = False
-                nombre_nueva_curva = ""
-            else:
-                if st.session_state.get(f"crear_curva_{fk}", False):
-                    col_input, col_btn = st.columns([8, 1])
-                    with col_input:
-                        nombre_nueva_curva = st.text_input("Nombre de la Nueva Curva", placeholder="Ej: Urbana Mujer", key=f"txt_ncurv_{fk}").strip()
-                    with col_btn:
-                        st.write("&nbsp;")
-                        if st.button("🔙", key=f"b_curv_{fk}", help="Volver a la lista"):
-                            st.session_state[f"crear_curva_{fk}"] = False
-                            st.rerun()
-                    es_nueva_curva = True
-                    t_d_def, t_h_def, cantidades_def = 35, 40, []
-                else:
-                    opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_curvas]
-                    curva_elegida = st.selectbox("Curva de Talles", opciones, key=f"sel_curv_{fk}")
-                    if curva_elegida == "➕ Crear Nueva...":
-                        st.session_state[f"crear_curva_{fk}"] = True
-                        st.rerun()
-                    
-                    if curva_elegida != "-- Elegir --" and curva_elegida != "➕ Crear Nueva...":
-                        obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
-                        if obj:
-                            partes = obj['valor'].split('|')
-                            t_d_def, t_h_def = int(partes[0]), int(partes[1])
-                            cantidades_def = partes[2].split('-')
-                        nombre_nueva_curva = curva_elegida
-                        es_nueva_curva = False
-                    else:
-                        t_d_def, t_h_def, cantidades_def = 35, 40, []
-                        nombre_nueva_curva = ""
-                        es_nueva_curva = False
-
-                col_d, col_h = st.columns(2)
-                with col_d: t_desde = st.number_input("Talle Desde", min_value=15, max_value=50, value=t_d_def, key=f"num_td_{fk}")
-                with col_h: t_hasta = st.number_input("Talle Hasta", min_value=15, max_value=50, value=t_h_def, key=f"num_th_{fk}")
+            cantidades_def = []
+            if curva_elegida == "➕ Armar Nueva Curva...":
+                tipo_curva_sel = st.radio("Tipo de Numeración", ["Numérica Simple", "Doble Par (Ej: 34/35)", "Doble Impar (Ej: 35/36)", "Alfabética (XS, S...)", "Sin Curva (N/A)"], horizontal=True, key=f"radio_tipo_{fk}")
                 
-                if t_hasta >= t_desde:
-                    talles_list = list(range(t_desde, t_hasta + 1))
-                    cols_talles = st.columns(len(talles_list))
+                if tipo_curva_sel == "Sin Curva (N/A)":
+                    t_d_sel, t_h_sel = "N/A", "N/A"
+                elif tipo_curva_sel == "Numérica Simple":
+                    cd, ch = st.columns(2)
+                    t_d_sel = str(cd.number_input("Desde", 15, 50, 35, key=f"n_d_{fk}"))
+                    t_h_sel = str(ch.number_input("Hasta", 15, 50, 40, key=f"n_h_{fk}"))
+                elif tipo_curva_sel == "Doble Par (Ej: 34/35)":
+                    lst = ["34/35", "36/37", "38/39", "40/41", "42/43", "44/45", "46/47"]
+                    cd, ch = st.columns(2)
+                    t_d_sel = cd.selectbox("Desde", lst, index=0, key=f"dp_d_{fk}")
+                    t_h_sel = ch.selectbox("Hasta", lst, index=3, key=f"dp_h_{fk}")
+                elif tipo_curva_sel == "Doble Impar (Ej: 35/36)":
+                    lst = ["35/36", "37/38", "39/40", "41/42", "43/44", "45/46", "47/48"]
+                    cd, ch = st.columns(2)
+                    t_d_sel = cd.selectbox("Desde", lst, index=0, key=f"di_d_{fk}")
+                    t_h_sel = ch.selectbox("Hasta", lst, index=3, key=f"di_h_{fk}")
+                elif tipo_curva_sel == "Alfabética (XS, S...)":
+                    lst = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+                    cd, ch = st.columns(2)
+                    t_d_sel = cd.selectbox("Desde", lst, index=2, key=f"a_d_{fk}")
+                    t_h_sel = ch.selectbox("Hasta", lst, index=4, key=f"a_h_{fk}")
+                
+                nombre_nueva_curva = st.text_input("💾 Nombre para guardar esta curva en tu lista (Opcional)", placeholder="Ej: Ojotas Mujer M-XL", key=f"txt_ncurv_{fk}").strip()
+                guardar_curva = True if nombre_nueva_curva and tipo_curva_sel != "Sin Curva (N/A)" else False
+                es_nueva_curva = True
+                
+            else:
+                obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
+                partes = obj['valor'].split('|')
+                if len(partes) == 4: # Formato nuevo
+                    tipo_curva_sel, t_d_sel, t_h_sel = partes[0], partes[1], partes[2]
+                    cantidades_def = partes[3].split('-')
+                else: # Retrocompatibilidad
+                    tipo_curva_sel, t_d_sel, t_h_sel = "Numérica Simple", partes[0], partes[1]
+                    cantidades_def = partes[2].split('-')
+                
+                st.info(f"📌 Cargando curva predefinida: {tipo_curva_sel} ({t_d_sel} al {t_h_sel})")
+                es_nueva_curva = False
+                guardar_curva = False
+                nombre_nueva_curva = ""
+
+            # --- DIBUJO DE LA GRILLA ---
+            talles_list_str = generar_lista_talles(tipo_curva_sel, t_d_sel, t_h_sel)
+            
+            if tipo_curva_sel == "Sin Curva (N/A)":
+                st.info("📌 Este producto se guardará sin numeración específica.")
+                curva_final_str = "N/A"
+            else:
+                if talles_list_str:
+                    cols_talles = st.columns(len(talles_list_str))
                     valores_curva, total_pares = [], 0
                     
-                    for i, talle in enumerate(talles_list):
-                        val_defecto = int(cantidades_def[i]) if len(cantidades_def) > i else 0
+                    for i, talle in enumerate(talles_list_str):
+                        val_defecto = int(cantidades_def[i]) if (len(cantidades_def) > i and cantidades_def[i].isdigit()) else 0
                         with cols_talles[i]:
-                            val = st.number_input(f"T-{talle}", min_value=0, step=1, value=val_defecto, key=f"talle_{talle}_{fk}")
+                            val = st.number_input(f"T-{talle}", min_value=0, step=1, value=val_defecto, key=f"talle_{i}_{fk}")
                             valores_curva.append(str(val))
                             total_pares += val
                     
                     st.markdown(f"<p style='text-align: right; color: #d32f2f; font-weight: bold; font-size:18px;'>Total pares por caja: {total_pares}</p>", unsafe_allow_html=True)
                     curva_final_str = "-".join(valores_curva)
                 else:
-                    st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
+                    st.error("❌ Rango inválido. El talle 'Hasta' debe ser mayor o igual al 'Desde'.")
                     curva_final_str = ""
 
             st.write("---")
             precio = st.number_input("Precio de Lista ($)", min_value=0.0, key=f"num_precio_{fk}")
-            foto = st.file_uploader("Subir Foto del Calzado (Máx 250kb)", type=["jpg", "png", "jpeg"], key=f"file_foto_{fk}")
+            foto = st.file_uploader("Subir Foto del Calzado", type=["jpg", "png", "jpeg"], key=f"file_foto_{fk}")
             
             if st.button("Guardar Producto en Catálogo", type="primary", use_container_width=True):
                 if foto and foto.size > 256000:
                     st.error("❌ La imagen es demasiado pesada. El límite es de 250kb.")
-                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final or (not sin_curva and es_nueva_curva and not nombre_nueva_curva):
-                    st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría, Color o Nombre de Curva).")
+                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final:
+                    st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría o Color).")
                 else:
                     with st.spinner("Procesando y guardando..."):
                         try:
@@ -315,8 +337,8 @@ else:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_final}).execute()
                             if es_nuevo_col:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_final}).execute()
-                            if es_nueva_curva and not sin_curva:
-                                valor_curva = f"{t_desde}|{t_hasta}|{curva_final_str}"
+                            if guardar_curva:
+                                valor_curva = f"{tipo_curva_sel}|{t_d_sel}|{t_h_sel}|{curva_final_str}"
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_nueva_curva, "valor": valor_curva}).execute()
 
                             extension = foto.name.split('.')[-1]
@@ -328,7 +350,7 @@ else:
                                 "proveedor": st.session_state.usuario_actual,
                                 "categoria": cat_final, "articulo": art, "color": col_final, 
                                 "descripcion": desc, "precio": precio,
-                                "talle_desde": t_desde, "talle_hasta": t_hasta,
+                                "talle_desde": t_d_sel, "talle_hasta": t_h_sel,
                                 "curva": curva_final_str, "foto_url": foto_url
                             }
                             supabase.table("productos").insert(nuevo_prod).execute()
