@@ -26,16 +26,14 @@ def init_connection():
 
 supabase: Client = init_connection()
 
-# --- ESTADO DE SESIÓN ---
+# --- ESTADO DE SESIÓN Y LLAVES DE RESETEO ---
 if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = None
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "form_key" not in st.session_state: st.session_state.form_key = 0 
-if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "inicio"
 
 fk = st.session_state.form_key 
 
-# --- FUNCIONES AUXILIARES ---
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
     payload = {"destinatario": destinatario, "clave": nueva_clave}
@@ -45,21 +43,22 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
         return False, "Error en el script de Google"
     except Exception as e: return False, str(e)
 
+# Motor de generación robusta de Talles (Soporta desde infantiles hasta adultos grandes)
 def generar_lista_talles(tipo, d, h):
-    if tipo == "Sin Curva (N/A)": return []
-    elif tipo == "Numérica Simple":
+    if "Sin Curva" in tipo: return []
+    elif "Numérica Simple" in tipo:
         return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
-    elif tipo == "Doble Par (Ej: 34/35)":
-        lista = ["34/35", "36/37", "38/39", "40/41", "42/43", "44/45", "46/47"]
+    elif "Doble Par" in tipo:
+        lista = [f"{i}/{i+1}" for i in range(14, 51, 2)]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
-    elif tipo == "Doble Impar (Ej: 35/36)":
-        lista = ["35/36", "37/38", "39/40", "41/42", "43/44", "45/46", "47/48"]
+    elif "Doble Impar" in tipo:
+        lista = [f"{i}/{i+1}" for i in range(15, 50, 2)]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
-    elif tipo == "Alfabética (XS, S...)":
+    elif "Alfabética" in tipo:
         lista = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
@@ -67,10 +66,11 @@ def generar_lista_talles(tipo, d, h):
     return []
 
 # ========================================================
-# FLUX 1: ENTORNO PÚBLICO (URL LIMPIA GARANTIZADA)
+# FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    # 🧹 Destruimos cualquier parámetro en la URL para que siempre se vea limpia
+    # Capturamos a dónde quiere ir el usuario, y luego limpiamos la URL para que no se vea fea
+    ruta_publica = st.query_params.get("sec", "inicio")
     st.query_params.clear()
     
     col_logo, col_nav = st.columns([2, 3])
@@ -78,21 +78,21 @@ if st.session_state.usuario_actual is None:
     with col_nav:
         sub_col1, sub_col2, sub_col3 = st.columns(3)
         with sub_col1:
-            if st.button("🏠 Inicio", use_container_width=True): st.session_state.seccion_publica = "inicio"; st.rerun()
+            if st.button("🏠 Inicio", use_container_width=True): st.query_params["sec"] = "inicio"; st.rerun()
         with sub_col2:
-            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.session_state.seccion_publica = "login"; st.rerun()
+            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.query_params["sec"] = "login"; st.rerun()
         with sub_col3:
-            if st.button("📝 Registrarse", use_container_width=True): st.session_state.seccion_publica = "registro"; st.rerun()
+            if st.button("📝 Registrarse", use_container_width=True): st.query_params["sec"] = "registro"; st.rerun()
     st.write("---")
 
-    if st.session_state.seccion_publica == "inicio":
+    if ruta_publica == "inicio":
         st.title("🚀 Conectamos Fábricas de Calzado con Revendedores")
         st.write("")
         col_b1, col_b2 = st.columns(2)
         with col_b1: st.info("🏭 **FÁBRICA DESTACADA A**\n\nNueva Colección Primavera-Verano. Lanzamientos exclusivos.")
         with col_b2: st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
 
-    elif st.session_state.seccion_publica == "login":
+    elif ruta_publica == "login":
         col_login = st.columns([1, 2, 1])[1]
         with col_login:
             with st.form("login"):
@@ -105,13 +105,12 @@ if st.session_state.usuario_actual is None:
                         st.session_state.usuario_actual = res.data[0]["email"]
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
-                        # Inyectamos el parámetro solo cuando ya está logueado
                         st.query_params["panel"] = "carga"
                         st.rerun()
                     else: st.error("❌ Datos incorrectos.")
-            if st.button("¿Olvidaste tu contraseña?"): st.session_state.seccion_publica = "recuperar"; st.rerun()
+            if st.button("¿Olvidaste tu contraseña?"): st.query_params["sec"] = "recuperar"; st.rerun()
 
-    elif st.session_state.seccion_publica == "registro":
+    elif ruta_publica == "registro":
         col_reg = st.columns([1, 2, 1])[1]
         with col_reg:
             with st.form("reg"):
@@ -129,12 +128,12 @@ if st.session_state.usuario_actual is None:
                             supabase.table("usuarios").insert({"email": email, "contrasena": p1, "rol": rol, "nombre_marca": marca}).execute()
                             st.success("✅ Cuenta creada. Redirigiendo al inicio de sesión...")
                             time.sleep(1.5)
-                            st.session_state.seccion_publica = "login"
+                            st.query_params["sec"] = "login"
                             st.rerun()
                         else: st.error("❌ Correo ya registrado.")
                     else: st.warning("Revisa los datos.")
 
-    elif st.session_state.seccion_publica == "recuperar":
+    elif ruta_publica == "recuperar":
         col_rec = st.columns([1, 2, 1])[1]
         with col_rec:
             with st.form("recup"):
@@ -156,6 +155,7 @@ if st.session_state.usuario_actual is None:
 # ========================================================
 else:
     ruta_privada = st.query_params.get("panel", "carga")
+    st.query_params.clear() # Limpiamos la URL privada también
 
     with st.sidebar:
         st.markdown(f"### {st.session_state.marca_actual}")
@@ -164,6 +164,7 @@ else:
         if st.session_state.rol_actual == "proveedor":
             st.success("🏭 Panel Fábrica")
             st.write("---")
+            if st.button("🏠 Portada Principal", use_container_width=True): st.query_params["panel"] = "portada"; st.rerun()
             if st.button("➕ Cargar Calzado", use_container_width=True): st.query_params["panel"] = "carga"; st.rerun()
             if st.button("👞 Mi Catálogo", use_container_width=True): st.query_params["panel"] = "catalogo"; st.rerun()
             if st.button("👥 Mis Revendedores", use_container_width=True): st.query_params["panel"] = "clientes"; st.rerun()
@@ -174,7 +175,7 @@ else:
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.clear()
-            st.query_params.clear()
+            st.query_params["sec"] = "inicio"
             st.rerun()
 
     # ----------------------------------------------------
@@ -186,11 +187,19 @@ else:
         mis_categorias = [c for c in mis_configs if c['tipo'] == 'categoria']
         mis_colores = [c for c in mis_configs if c['tipo'] == 'color']
         mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
-
-        st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
         
+        # PESTAÑA: PORTADA PUBLICA (VISTA PRIVADA)
+        if ruta_privada == "portada":
+            st.title("🚀 Portada Comercial - NotPed")
+            st.write("Así ven tu plataforma los visitantes no registrados:")
+            st.write("")
+            col_b1, col_b2 = st.columns(2)
+            with col_b1: st.info("🏭 **FÁBRICA DESTACADA A**\n\nNueva Colección Primavera-Verano. Lanzamientos exclusivos.")
+            with col_b2: st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
+
         # PESTAÑA 1: CARGA DE CALZADO
-        if ruta_privada == "carga":
+        elif ruta_privada == "carga":
+            st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
             with st.expander("⚙️ Administrar mis Listas (Eliminar categorías, colores o curvas)"):
                 col_m1, col_m2, col_m3 = st.columns(3)
                 with col_m1:
@@ -249,12 +258,11 @@ else:
             st.write("---")
             st.markdown("**📏 Configuración de Curva de Talles**")
             
-            # --- SUPER SELECTOR DE CURVAS ---
             curva_elegida = st.selectbox("Selecciona una Curva Guardada o crea una nueva", ["➕ Armar Nueva Curva..."] + [c['nombre'] for c in mis_curvas], key=f"sel_curv_{fk}")
             
             cantidades_def = []
             if curva_elegida == "➕ Armar Nueva Curva...":
-                tipo_curva_sel = st.radio("Tipo de Numeración", ["Numérica Simple", "Doble Par (Ej: 34/35)", "Doble Impar (Ej: 35/36)", "Alfabética (XS, S...)", "Sin Curva (N/A)"], horizontal=True, key=f"radio_tipo_{fk}")
+                tipo_curva_sel = st.radio("Tipo de Numeración", ["Numérica Simple", "Doble Par (Ej: 14/15)", "Doble Impar (Ej: 15/16)", "Alfabética (XS, S...)", "Sin Curva (N/A)"], horizontal=True, key=f"radio_tipo_{fk}")
                 
                 if tipo_curva_sel == "Sin Curva (N/A)":
                     t_d_sel, t_h_sel = "N/A", "N/A"
@@ -262,16 +270,16 @@ else:
                     cd, ch = st.columns(2)
                     t_d_sel = str(cd.number_input("Desde", 15, 50, 35, key=f"n_d_{fk}"))
                     t_h_sel = str(ch.number_input("Hasta", 15, 50, 40, key=f"n_h_{fk}"))
-                elif tipo_curva_sel == "Doble Par (Ej: 34/35)":
-                    lst = ["34/35", "36/37", "38/39", "40/41", "42/43", "44/45", "46/47"]
+                elif tipo_curva_sel == "Doble Par (Ej: 14/15)":
+                    lst = [f"{i}/{i+1}" for i in range(14, 51, 2)]
                     cd, ch = st.columns(2)
-                    t_d_sel = cd.selectbox("Desde", lst, index=0, key=f"dp_d_{fk}")
-                    t_h_sel = ch.selectbox("Hasta", lst, index=3, key=f"dp_h_{fk}")
-                elif tipo_curva_sel == "Doble Impar (Ej: 35/36)":
-                    lst = ["35/36", "37/38", "39/40", "41/42", "43/44", "45/46", "47/48"]
+                    t_d_sel = cd.selectbox("Desde", lst, index=10, key=f"dp_d_{fk}")
+                    t_h_sel = ch.selectbox("Hasta", lst, index=13, key=f"dp_h_{fk}")
+                elif tipo_curva_sel == "Doble Impar (Ej: 15/16)":
+                    lst = [f"{i}/{i+1}" for i in range(15, 50, 2)]
                     cd, ch = st.columns(2)
-                    t_d_sel = cd.selectbox("Desde", lst, index=0, key=f"di_d_{fk}")
-                    t_h_sel = ch.selectbox("Hasta", lst, index=3, key=f"di_h_{fk}")
+                    t_d_sel = cd.selectbox("Desde", lst, index=10, key=f"di_d_{fk}")
+                    t_h_sel = ch.selectbox("Hasta", lst, index=13, key=f"di_h_{fk}")
                 elif tipo_curva_sel == "Alfabética (XS, S...)":
                     lst = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
                     cd, ch = st.columns(2)
@@ -285,10 +293,10 @@ else:
             else:
                 obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
                 partes = obj['valor'].split('|')
-                if len(partes) == 4: # Formato nuevo
+                if len(partes) == 4:
                     tipo_curva_sel, t_d_sel, t_h_sel = partes[0], partes[1], partes[2]
                     cantidades_def = partes[3].split('-')
-                else: # Retrocompatibilidad
+                else: 
                     tipo_curva_sel, t_d_sel, t_h_sel = "Numérica Simple", partes[0], partes[1]
                     cantidades_def = partes[2].split('-')
                 
@@ -297,10 +305,9 @@ else:
                 guardar_curva = False
                 nombre_nueva_curva = ""
 
-            # --- DIBUJO DE LA GRILLA ---
             talles_list_str = generar_lista_talles(tipo_curva_sel, t_d_sel, t_h_sel)
             
-            if tipo_curva_sel == "Sin Curva (N/A)":
+            if "Sin Curva" in tipo_curva_sel:
                 st.info("📌 Este producto se guardará sin numeración específica.")
                 curva_final_str = "N/A"
             else:
@@ -350,12 +357,11 @@ else:
                                 "proveedor": st.session_state.usuario_actual,
                                 "categoria": cat_final, "articulo": art, "color": col_final, 
                                 "descripcion": desc, "precio": precio,
-                                "talle_desde": t_d_sel, "talle_hasta": t_h_sel,
+                                "talle_desde": str(t_d_sel), "talle_hasta": str(t_h_sel),
                                 "curva": curva_final_str, "foto_url": foto_url
                             }
                             supabase.table("productos").insert(nuevo_prod).execute()
                             
-                            # Magia de Reseteo y Redirección
                             st.session_state.form_key += 1
                             st.success("✅ ¡Producto cargado con éxito! Redirigiendo al catálogo...")
                             time.sleep(1.2)
@@ -366,6 +372,7 @@ else:
 
         # PESTAÑA 2: CATÁLOGO AGRUPADO
         elif ruta_privada == "catalogo":
+            st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
             st.subheader("Artículos Publicados")
             res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
             
@@ -403,6 +410,7 @@ else:
 
         # PESTAÑA 3: REVENDEDORES
         elif ruta_privada == "clientes":
+            st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
             st.subheader("Mis Clientes Autorizados")
             st.info("Próximamente: Aquí verás las notas de pedido que te envíen los revendedores, y podrás asignarles bonificaciones.")
 
