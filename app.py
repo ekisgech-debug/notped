@@ -40,7 +40,6 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
 # FLUX 1: ENTORNO PÚBLICO (Manejo con Flecha Atrás)
 # ========================================================
 if st.session_state.usuario_actual is None:
-    # Leemos la URL para saber dónde estamos (permite usar la flecha atrás del navegador)
     ruta_publica = st.query_params.get("sec", "inicio")
     
     col_logo, col_nav = st.columns([2, 3])
@@ -75,7 +74,6 @@ if st.session_state.usuario_actual is None:
                         st.session_state.usuario_actual = res.data[0]["email"]
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
-                        # Al loguearse, reseteamos la URL y entramos al panel
                         st.query_params["panel"] = "carga"
                         st.rerun()
                     else: st.error("❌ Datos incorrectos.")
@@ -125,7 +123,6 @@ if st.session_state.usuario_actual is None:
 # FLUX 2: ENTORNO PRIVADO
 # ========================================================
 else:
-    # Leemos la URL para la navegación privada (permite usar la flecha atrás del navegador)
     ruta_privada = st.query_params.get("panel", "carga")
 
     with st.sidebar:
@@ -183,19 +180,48 @@ else:
             st.write("---")
             st.subheader("Nuevo Producto")
             
-            # --- COMBOS INTELIGENTES (Condicionales para mantener 1 sola caja visualmente) ---
+            # --- LÓGICA DE REEMPLAZO MÁGICO PARA CATEGORÍA ---
             c_cat, c_col = st.columns(2)
             with c_cat:
-                opcion_cat = st.selectbox("Categoría", ["➕ Crear Nueva..."] + [c['nombre'] for c in mis_categorias], key=f"sel_cat_{fk}")
-                if opcion_cat == "➕ Crear Nueva...":
-                    cat_final = st.text_input("✍️ Escribe el nombre de la Categoría y presiona Enter", key=f"txt_cat_{fk}")
-                else: cat_final = opcion_cat
+                if st.session_state.get(f"crear_cat_{fk}", False):
+                    col_input, col_btn = st.columns([8, 1])
+                    with col_input:
+                        cat_final = st.text_input("Categoría", placeholder="Ingresá la nueva categoría...", key=f"txt_cat_{fk}").strip()
+                    with col_btn:
+                        st.write("&nbsp;")
+                        if st.button("🔙", key=f"b_cat_{fk}", help="Volver a la lista"):
+                            st.session_state[f"crear_cat_{fk}"] = False
+                            st.rerun()
+                    es_nueva_cat = True
+                else:
+                    opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_categorias]
+                    opcion_cat = st.selectbox("Categoría", opciones, key=f"sel_cat_{fk}")
+                    if opcion_cat == "➕ Crear Nueva...":
+                        st.session_state[f"crear_cat_{fk}"] = True
+                        st.rerun()
+                    cat_final = opcion_cat if opcion_cat != "-- Elegir --" else ""
+                    es_nueva_cat = False
 
+            # --- LÓGICA DE REEMPLAZO MÁGICO PARA COLOR ---
             with c_col:
-                opcion_col = st.selectbox("Color", ["➕ Crear Nuevo..."] + [c['nombre'] for c in mis_colores], key=f"sel_col_{fk}")
-                if opcion_col == "➕ Crear Nuevo...":
-                    col_final = st.text_input("✍️ Escribe el nombre del Color y presiona Enter", key=f"txt_col_{fk}")
-                else: col_final = opcion_col
+                if st.session_state.get(f"crear_col_{fk}", False):
+                    col_input, col_btn = st.columns([8, 1])
+                    with col_input:
+                        col_final = st.text_input("Color", placeholder="Ingresá el nuevo color...", key=f"txt_col_{fk}").strip()
+                    with col_btn:
+                        st.write("&nbsp;")
+                        if st.button("🔙", key=f"b_col_{fk}", help="Volver a la lista"):
+                            st.session_state[f"crear_col_{fk}"] = False
+                            st.rerun()
+                    es_nuevo_col = True
+                else:
+                    opciones = ["-- Elegir --", "➕ Crear Nuevo..."] + [c['nombre'] for c in mis_colores]
+                    opcion_col = st.selectbox("Color", opciones, key=f"sel_col_{fk}")
+                    if opcion_col == "➕ Crear Nuevo...":
+                        st.session_state[f"crear_col_{fk}"] = True
+                        st.rerun()
+                    col_final = opcion_col if opcion_col != "-- Elegir --" else ""
+                    es_nuevo_col = False
 
             art = st.text_input("Artículo (Ej: Bota 401)", key=f"txt_art_{fk}")
             desc = st.text_input("Descripción detallada", key=f"txt_desc_{fk}")
@@ -203,17 +229,39 @@ else:
             st.write("---")
             st.markdown("**📏 Configuración de Curva de Talles**")
             
-            # Lógica Combinada de Curva
-            curva_elegida = st.selectbox("Selecciona una Curva Guardada o crea una nueva", ["➕ Armar Nueva Curva..."] + [c['nombre'] for c in mis_curvas], key=f"sel_curv_{fk}")
-            
-            t_d_def, t_h_def, cantidades_def = 35, 40, []
-            if curva_elegida != "➕ Armar Nueva Curva...":
-                obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
-                if obj:
-                    partes = obj['valor'].split('|')
-                    t_d_def, t_h_def = int(partes[0]), int(partes[1])
-                    cantidades_def = partes[2].split('-')
+            # --- LÓGICA DE REEMPLAZO MÁGICO PARA CURVAS ---
+            if st.session_state.get(f"crear_curva_{fk}", False):
+                col_input, col_btn = st.columns([8, 1])
+                with col_input:
+                    nombre_nueva_curva = st.text_input("Nombre de la Nueva Curva", placeholder="Ej: Urbana Mujer", key=f"txt_ncurv_{fk}").strip()
+                with col_btn:
+                    st.write("&nbsp;")
+                    if st.button("🔙", key=f"b_curv_{fk}", help="Volver a la lista"):
+                        st.session_state[f"crear_curva_{fk}"] = False
+                        st.rerun()
+                es_nueva_curva = True
+                t_d_def, t_h_def, cantidades_def = 35, 40, []
+            else:
+                opciones = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_curvas]
+                curva_elegida = st.selectbox("Curva de Talles", opciones, key=f"sel_curv_{fk}")
+                if curva_elegida == "➕ Crear Nueva...":
+                    st.session_state[f"crear_curva_{fk}"] = True
+                    st.rerun()
+                
+                if curva_elegida != "-- Elegir --" and curva_elegida != "➕ Crear Nueva...":
+                    obj = next((c for c in mis_curvas if c['nombre'] == curva_elegida), None)
+                    if obj:
+                        partes = obj['valor'].split('|')
+                        t_d_def, t_h_def = int(partes[0]), int(partes[1])
+                        cantidades_def = partes[2].split('-')
+                    nombre_nueva_curva = curva_elegida
+                    es_nueva_curva = False
+                else:
+                    t_d_def, t_h_def, cantidades_def = 35, 40, []
+                    nombre_nueva_curva = ""
+                    es_nueva_curva = False
 
+            # DIBUJO DE LA GRILLA (Se mantiene siempre visible)
             col_d, col_h = st.columns(2)
             with col_d: t_desde = st.number_input("Talle Desde", min_value=15, max_value=50, value=t_d_def, key=f"num_td_{fk}")
             with col_h: t_hasta = st.number_input("Talle Hasta", min_value=15, max_value=50, value=t_h_def, key=f"num_th_{fk}")
@@ -236,36 +284,28 @@ else:
                 st.error("El Talle Hasta debe ser mayor o igual al Talle Desde.")
                 curva_final_str = ""
 
-            if curva_elegida == "➕ Armar Nueva Curva...":
-                nombre_nueva_curva = st.text_input("💾 Nombre para guardar esta curva y usarla la próxima vez (Ej: Urbana Mujer)", key=f"txt_ncurv_{fk}")
-                guardar_curva = True
-            else:
-                nombre_nueva_curva = curva_elegida
-                guardar_curva = False
-
             st.write("---")
             precio = st.number_input("Precio de Lista ($)", min_value=0.0, key=f"num_precio_{fk}")
             foto = st.file_uploader("Subir Foto del Calzado (Máx 250kb)", type=["jpg", "png", "jpeg"], key=f"file_foto_{fk}")
             
-            # Sacamos el botón del st.form para poder limpiar la pantalla con el contador
             if st.button("Guardar Producto en Catálogo", type="primary", use_container_width=True):
                 if foto and foto.size > 256000:
                     st.error("❌ La imagen es demasiado pesada. El límite es de 250kb.")
-                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final:
-                    st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría o Color).")
+                elif not art or not foto or curva_final_str == "" or not cat_final or not col_final or (es_nueva_curva and not nombre_nueva_curva):
+                    st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría, Color o Nombre de Curva).")
                 else:
                     with st.spinner("Procesando y guardando..."):
                         try:
-                            # 1. Guardar nueva categoría/color si son nuevos y no existen
-                            if opcion_cat == "➕ Crear Nueva..." and cat_final:
+                            # Guardar en base de datos de configuraciones si son nuevas
+                            if es_nueva_cat:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_final}).execute()
-                            if opcion_col == "➕ Crear Nuevo..." and col_final:
+                            if es_nuevo_col:
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_final}).execute()
-                            if guardar_curva and nombre_nueva_curva:
+                            if es_nueva_curva:
                                 valor_curva = f"{t_desde}|{t_hasta}|{curva_final_str}"
                                 supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_nueva_curva, "valor": valor_curva}).execute()
 
-                            # 2. Subir foto y guardar producto
+                            # Subir foto y guardar producto
                             extension = foto.name.split('.')[-1]
                             nombre_archivo = f"{uuid.uuid4()}.{extension}"
                             supabase.storage.from_("fotos_productos").upload(nombre_archivo, foto.getvalue(), {"content-type": foto.type})
@@ -280,7 +320,7 @@ else:
                             }
                             supabase.table("productos").insert(nuevo_prod).execute()
                             
-                            # Magia de Reseteo: Cambiamos la llave maestra y recargamos
+                            # Magia de Reseteo
                             st.session_state.form_key += 1
                             st.success("✅ ¡Producto cargado con éxito! Formulario listo para el siguiente.")
                             time.sleep(1.5)
