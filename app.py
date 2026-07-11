@@ -37,7 +37,23 @@ if "seccion_publica" not in st.session_state: st.session_state.seccion_publica =
 if "panel_privado" not in st.session_state: st.session_state.panel_privado = "carga"
 
 fk = st.session_state.form_key 
-st.query_params.clear()
+
+# ========================================================
+# AUTO-RECUPERACIÓN DE SESIÓN (ANTI-F5)
+# ========================================================
+# Si el usuario es None, pero hay un ID en la URL, significa que apretó F5.
+# Lo buscamos y lo volvemos a loguear automáticamente.
+if st.session_state.usuario_actual is None and "uid" in st.query_params:
+    try:
+        res = supabase.table("usuarios").select("*").eq("id", st.query_params["uid"]).execute()
+        if res.data:
+            st.session_state.usuario_actual = res.data[0]["email"]
+            st.session_state.rol_actual = res.data[0]["rol"]
+            st.session_state.marca_actual = res.data[0]["nombre_marca"]
+            st.session_state.panel_privado = st.query_params.get("panel", "carga")
+    except Exception:
+        pass
+
 
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
@@ -48,22 +64,23 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
         return False, "Error en el script de Google"
     except Exception as e: return False, str(e)
 
+# --- NUEVOS RANGOS DE TALLES ---
 def generar_lista_talles(tipo, d, h):
     if "Sin Curva" in tipo: return []
     elif "Numérica Simple" in tipo:
         return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
     elif "Doble Par" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(14, 51, 2)]
+        lista = [f"{i}/{i+1}" for i in range(12, 54, 2)] # 12/13 a 52/53
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
     elif "Doble Impar" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(15, 50, 2)]
+        lista = [f"{i}/{i+1}" for i in range(13, 55, 2)] # 13/14 a 53/54
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
     elif "Alfabética" in tipo:
-        lista = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+        lista = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
@@ -73,6 +90,9 @@ def generar_lista_talles(tipo, d, h):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
+    # URL Limpia solo en la vista pública
+    st.query_params.clear()
+
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
     with col_nav:
@@ -106,6 +126,10 @@ if st.session_state.usuario_actual is None:
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
                         st.session_state.panel_privado = "carga"
+                        
+                        # Inyectamos el ancla anti-F5 en la URL
+                        st.query_params["uid"] = str(res.data[0]["id"])
+                        st.query_params["panel"] = "carga"
                         st.rerun()
                     else: st.error("❌ Datos incorrectos.")
             if st.button("¿Olvidaste tu contraseña?"): st.session_state.seccion_publica = "recuperar"; st.rerun()
@@ -161,10 +185,22 @@ else:
         if st.session_state.rol_actual == "proveedor":
             st.success("🏭 Panel Fábrica")
             st.write("---")
-            if st.button("🏠 Portada Principal", use_container_width=True): st.session_state.panel_privado = "portada"; st.rerun()
-            if st.button("➕ Cargar Calzado", use_container_width=True): st.session_state.panel_privado = "carga"; st.rerun()
-            if st.button("👞 Mi Catálogo", use_container_width=True): st.session_state.panel_privado = "catalogo"; st.rerun()
-            if st.button("👥 Mis Revendedores", use_container_width=True): st.session_state.panel_privado = "clientes"; st.rerun()
+            if st.button("🏠 Portada Principal", use_container_width=True): 
+                st.session_state.panel_privado = "portada"
+                st.query_params["panel"] = "portada"
+                st.rerun()
+            if st.button("➕ Cargar Calzado", use_container_width=True): 
+                st.session_state.panel_privado = "carga"
+                st.query_params["panel"] = "carga"
+                st.rerun()
+            if st.button("👞 Mi Catálogo", use_container_width=True): 
+                st.session_state.panel_privado = "catalogo"
+                st.query_params["panel"] = "catalogo"
+                st.rerun()
+            if st.button("👥 Mis Revendedores", use_container_width=True): 
+                st.session_state.panel_privado = "clientes"
+                st.query_params["panel"] = "clientes"
+                st.rerun()
         
         elif st.session_state.rol_actual == "revendedor": st.warning("🛒 Panel Revendedor")
         else: st.info("👑 Admin")
@@ -172,6 +208,7 @@ else:
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.clear()
+            st.query_params.clear()
             st.rerun()
 
     if st.session_state.rol_actual == "proveedor":
@@ -181,6 +218,7 @@ else:
         mis_colores = [c for c in mis_configs if c['tipo'] == 'color']
         mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
         
+        # PESTAÑA: PORTADA PUBLICA
         if st.session_state.panel_privado == "portada":
             st.title("🚀 Portada Comercial - NotPed")
             st.write("Así ven tu plataforma los visitantes no registrados:")
@@ -259,29 +297,29 @@ else:
                 
                 cantidades_def = []
                 if curva_elegida == "➕ Armar Nueva Curva...":
-                    tipo_curva_sel = st.radio("Tipo de Numeración", ["Numérica Simple", "Doble Par (Ej: 14/15)", "Doble Impar (Ej: 15/16)", "Alfabética (XS, S...)", "Sin Curva (N/A)"], horizontal=True, key=f"radio_tipo_{fk}")
+                    tipo_curva_sel = st.radio("Tipo de Numeración", ["Numérica Simple", "Doble Par (Ej: 12/13)", "Doble Impar (Ej: 13/14)", "Alfabética (XXXS, S...)", "Sin Curva (N/A)"], horizontal=True, key=f"radio_tipo_{fk}")
                     
                     if tipo_curva_sel == "Sin Curva (N/A)":
                         t_d_sel, t_h_sel = "N/A", "N/A"
                     elif tipo_curva_sel == "Numérica Simple":
                         cd, ch = st.columns(2)
-                        t_d_sel = str(cd.number_input("Desde", 15, 50, 35, key=f"n_d_{fk}"))
-                        t_h_sel = str(ch.number_input("Hasta", 15, 50, 40, key=f"n_h_{fk}"))
-                    elif tipo_curva_sel == "Doble Par (Ej: 14/15)":
-                        lst = [f"{i}/{i+1}" for i in range(14, 51, 2)]
+                        t_d_sel = str(cd.number_input("Desde", min_value=1, max_value=120, value=35, key=f"n_d_{fk}"))
+                        t_h_sel = str(ch.number_input("Hasta", min_value=1, max_value=120, value=40, key=f"n_h_{fk}"))
+                    elif tipo_curva_sel == "Doble Par (Ej: 12/13)":
+                        lst = [f"{i}/{i+1}" for i in range(12, 54, 2)]
                         cd, ch = st.columns(2)
-                        t_d_sel = cd.selectbox("Desde", lst, index=10, key=f"dp_d_{fk}")
-                        t_h_sel = ch.selectbox("Hasta", lst, index=13, key=f"dp_h_{fk}")
-                    elif tipo_curva_sel == "Doble Impar (Ej: 15/16)":
-                        lst = [f"{i}/{i+1}" for i in range(15, 50, 2)]
+                        t_d_sel = cd.selectbox("Desde", lst, index=11, key=f"dp_d_{fk}")
+                        t_h_sel = ch.selectbox("Hasta", lst, index=14, key=f"dp_h_{fk}")
+                    elif tipo_curva_sel == "Doble Impar (Ej: 13/14)":
+                        lst = [f"{i}/{i+1}" for i in range(13, 55, 2)]
                         cd, ch = st.columns(2)
-                        t_d_sel = cd.selectbox("Desde", lst, index=10, key=f"di_d_{fk}")
-                        t_h_sel = ch.selectbox("Hasta", lst, index=13, key=f"di_h_{fk}")
-                    elif tipo_curva_sel == "Alfabética (XS, S...)":
-                        lst = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+                        t_d_sel = cd.selectbox("Desde", lst, index=11, key=f"di_d_{fk}")
+                        t_h_sel = ch.selectbox("Hasta", lst, index=14, key=f"di_h_{fk}")
+                    elif tipo_curva_sel == "Alfabética (XXXS, S...)":
+                        lst = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
                         cd, ch = st.columns(2)
-                        t_d_sel = cd.selectbox("Desde", lst, index=2, key=f"a_d_{fk}")
-                        t_h_sel = ch.selectbox("Hasta", lst, index=4, key=f"a_h_{fk}")
+                        t_d_sel = cd.selectbox("Desde", lst, index=3, key=f"a_d_{fk}")
+                        t_h_sel = ch.selectbox("Hasta", lst, index=5, key=f"a_h_{fk}")
                     
                     nombre_nueva_curva = st.text_input("💾 Nombre para guardar esta curva en tu lista (Opcional)", placeholder="Ej: Ojotas Mujer M-XL", key=f"txt_ncurv_{fk}").strip()
                     guardar_curva = True if nombre_nueva_curva and tipo_curva_sel != "Sin Curva (N/A)" else False
@@ -361,6 +399,7 @@ else:
                                 st.success("✅ ¡Producto cargado con éxito! Redirigiendo al catálogo...")
                                 time.sleep(1)
                                 st.session_state.panel_privado = "catalogo"
+                                st.query_params["panel"] = "catalogo"
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al guardar: {e}")
@@ -371,7 +410,7 @@ else:
             elif tipo_carga == "Carga Masiva (Excel)":
                 st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El procesamiento ahora es ultrarrápido y masivo. Las categorías, colores y curvas nuevas se aprenderán automáticamente.")
                 
-                # Generar Plantilla Excel con Validaciones
+                # Generar Plantilla Excel con Validaciones actualizadas
                 df_template = pd.DataFrame({
                     "Categoría": ["Ej: Deportiva Goma"],
                     "Artículo": ["Zapa Urban"],
@@ -390,7 +429,6 @@ else:
                     df_template.to_excel(writer, index=False, sheet_name='Plantilla')
                     worksheet = writer.sheets['Plantilla']
                     
-                    # Ajustar anchos visuales
                     for column in worksheet.columns:
                         max_length = 0
                         col_letter = column[0].column_letter
@@ -400,10 +438,10 @@ else:
                             except: pass
                         worksheet.column_dimensions[col_letter].width = max_length + 2
 
-                    # Inyectar Validaciones Desplegables en el Excel
-                    dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par (Ej: 14/15),Doble Impar (Ej: 15/16),Alfabética (XS, S...),Sin Curva (N/A)"', allow_blank=True)
+                    # Actualización de Validaciones en Excel para coincidir con los nuevos textos
+                    dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par (Ej: 12/13),Doble Impar (Ej: 13/14),Alfabética (XXXS, S...),Sin Curva (N/A)"', allow_blank=True)
                     worksheet.add_data_validation(dv_tipo)
-                    dv_tipo.add('F3:F1048576') # Columna F es "Tipo Curva", aplica de la fila 3 hasta abajo
+                    dv_tipo.add('F3:F1048576') 
                 
                 st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
@@ -414,10 +452,8 @@ else:
                     if st.button("🚀 Iniciar Procesamiento Masivo", type="primary"):
                         with st.spinner("Procesando productos en bloque... (Esto tomará solo un segundo)"):
                             try:
-                                # Leemos el excel saltando la fila 2 (índice 1) que es la de los ejemplos
                                 df = pd.read_excel(excel_file, skiprows=[1]).fillna("")
                                 
-                                # Auto-aprendizaje Masivo de Configuraciones
                                 nombres_cat_db = [c['nombre'] for c in mis_categorias]
                                 nombres_col_db = [c['nombre'] for c in mis_colores]
                                 nombres_cur_db = [c['nombre'] for c in mis_curvas]
@@ -432,14 +468,12 @@ else:
                                     art_xls = str(row.get("Artículo", "")).strip()
                                     col_xls = str(row.get("Color", "")).strip()
                                     
-                                    if not art_xls or not cat_xls: continue # Si la fila está en blanco, se salta
+                                    if not art_xls or not cat_xls: continue 
                                     
-                                    # Preparar nueva categoría
                                     if cat_xls not in nombres_cat_db and cat_xls not in cats_vistas:
                                         nuevas_cats.append({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_xls})
                                         cats_vistas.add(cat_xls)
                                         
-                                    # Preparar nuevo color
                                     if col_xls and col_xls not in nombres_col_db and col_xls not in cols_vistas:
                                         nuevas_cols.append({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_xls})
                                         cols_vistas.add(col_xls)
@@ -449,7 +483,6 @@ else:
                                     t_hasta = str(row.get("Talle Hasta", "N/A")).strip()
                                     cantidades = str(row.get("Cantidades (Ej: 2-2-3-2-2-1)", "N/A")).strip()
                                     
-                                    # Preparar nueva curva
                                     nombre_curva_xls = f"Excel: {cat_xls} {col_xls}"
                                     if t_curva != "Sin Curva (N/A)" and cantidades != "N/A" and nombre_curva_xls not in nombres_cur_db and nombre_curva_xls not in curvas_vistas:
                                         val_curva_xls = f"{t_curva}|{t_desde}|{t_hasta}|{cantidades}"
@@ -462,14 +495,12 @@ else:
                                     f_url = str(row.get("URL Foto (Opcional)", "")).strip()
                                     v_url = str(row.get("URL Video (Opcional)", "")).strip()
                                     
-                                    # Empaquetar el producto para el Bulk Insert
                                     productos_a_insertar.append({
                                         "proveedor": st.session_state.usuario_actual, "categoria": cat_xls, "articulo": art_xls, "color": col_xls, 
                                         "descripcion": str(row.get("Descripción", "")).strip(), "precio": precio_xls,
                                         "talle_desde": t_desde, "talle_hasta": t_hasta, "curva": cantidades, "foto_url": f_url if f_url else None, "video_url": v_url if v_url else None
                                     })
                                 
-                                # DISPARO MASIVO (BULK INSERT) - ¡Súper rápido!
                                 if nuevas_cats: supabase.table("configuraciones_fabrica").insert(nuevas_cats).execute()
                                 if nuevas_cols: supabase.table("configuraciones_fabrica").insert(nuevas_cols).execute()
                                 if nuevas_curvas: supabase.table("configuraciones_fabrica").insert(nuevas_curvas).execute()
@@ -480,6 +511,7 @@ else:
                                 st.success(f"✅ ¡Se procesaron {len(productos_a_insertar)} productos en tiempo récord! Redirigiendo al catálogo...")
                                 time.sleep(2)
                                 st.session_state.panel_privado = "catalogo"
+                                st.query_params["panel"] = "catalogo"
                                 st.rerun()
                                 
                             except Exception as e:
