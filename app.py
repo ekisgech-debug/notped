@@ -8,6 +8,7 @@ import requests
 import time
 import pandas as pd
 import io
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # Configuración de página
 st.set_page_config(page_title="NotPed - B2B", page_icon="👞", layout="wide")
@@ -36,8 +37,6 @@ if "seccion_publica" not in st.session_state: st.session_state.seccion_publica =
 if "panel_privado" not in st.session_state: st.session_state.panel_privado = "carga"
 
 fk = st.session_state.form_key 
-
-# Garantizar URL limpia siempre
 st.query_params.clear()
 
 def enviar_correo_recuperacion(destinatario, nueva_clave):
@@ -74,7 +73,6 @@ def generar_lista_talles(tipo, d, h):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
     with col_nav:
@@ -183,7 +181,6 @@ else:
         mis_colores = [c for c in mis_configs if c['tipo'] == 'color']
         mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
         
-        # PESTAÑA: PORTADA PUBLICA
         if st.session_state.panel_privado == "portada":
             st.title("🚀 Portada Comercial - NotPed")
             st.write("Así ven tu plataforma los visitantes no registrados:")
@@ -340,7 +337,7 @@ else:
                     elif not art or not foto or curva_final_str == "" or not cat_final or not col_final:
                         st.warning("⚠️ Faltan datos clave (Artículo, Foto, Categoría o Color).")
                     else:
-                        with st.spinner("Procesando y guardando..."):
+                        with st.spinner("Guardando en la nube..."):
                             try:
                                 if es_nueva_cat: supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_final}).execute()
                                 if es_nuevo_col: supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_final}).execute()
@@ -362,66 +359,102 @@ else:
                                 
                                 st.session_state.form_key += 1
                                 st.success("✅ ¡Producto cargado con éxito! Redirigiendo al catálogo...")
-                                time.sleep(1.2)
+                                time.sleep(1)
                                 st.session_state.panel_privado = "catalogo"
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al guardar: {e}")
 
             # ----------------------------------------
-            # CARGA MASIVA (EXCEL)
+            # CARGA MASIVA (EXCEL) - OPTIMIZADA CON BULK INSERT
             # ----------------------------------------
             elif tipo_carga == "Carga Masiva (Excel)":
-                st.info("💡 **Instrucciones:** Descarga la plantilla, llénala respetando las columnas, y súbela. Si dejas la celda 'URL Foto' vacía, podrás cargar la foto luego desde 'Mi Catálogo'. Las categorías y colores nuevos se aprenderán automáticamente.")
+                st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El procesamiento ahora es ultrarrápido y masivo. Las categorías, colores y curvas nuevas se aprenderán automáticamente.")
                 
-                # Generar Plantilla Excel en memoria
+                # Generar Plantilla Excel con Validaciones
                 df_template = pd.DataFrame({
-                    "Categoría": ["Ej: Deportiva Goma"], "Artículo": ["Zapa Urban"], "Color": ["Negro"],
-                    "Descripción": ["Suela inyectada"], "Precio": [15000], 
-                    "Tipo Curva": ["Numérica Simple"], "Talle Desde": ["35"], "Talle Hasta": ["40"],
-                    "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"], "URL Foto (Opcional)": [""], "URL Video (Opcional)": ["https://youtu.be/..."]
+                    "Categoría": ["Ej: Deportiva Goma"],
+                    "Artículo": ["Zapa Urban"],
+                    "Color": ["Negro"],
+                    "Descripción": ["Suela inyectada, alta resistencia"],
+                    "Precio": [15000], 
+                    "Tipo Curva": ["Numérica Simple"],
+                    "Talle Desde": ["35"],
+                    "Talle Hasta": ["40"],
+                    "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
+                    "URL Foto (Opcional)": [""],
+                    "URL Video (Opcional)": ["https://youtu.be/..."]
                 })
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_template.to_excel(writer, index=False, sheet_name='Plantilla')
+                    worksheet = writer.sheets['Plantilla']
+                    
+                    # Ajustar anchos visuales
+                    for column in worksheet.columns:
+                        max_length = 0
+                        col_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                            except: pass
+                        worksheet.column_dimensions[col_letter].width = max_length + 2
+
+                    # Inyectar Validaciones Desplegables en el Excel
+                    dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par (Ej: 14/15),Doble Impar (Ej: 15/16),Alfabética (XS, S...),Sin Curva (N/A)"', allow_blank=True)
+                    worksheet.add_data_validation(dv_tipo)
+                    dv_tipo.add('F3:F1048576') # Columna F es "Tipo Curva", aplica de la fila 3 hasta abajo
                 
-                st.download_button(label="📥 Descargar Plantilla Excel", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.ms-excel")
+                st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 st.write("---")
                 excel_file = st.file_uploader("Sube tu archivo Excel lleno", type=["xlsx", "xls"])
                 
                 if excel_file is not None:
-                    if st.button("🚀 Procesar Excel y Cargar Productos"):
-                        with st.spinner("Leyendo archivo y aprendiendo datos..."):
+                    if st.button("🚀 Iniciar Procesamiento Masivo", type="primary"):
+                        with st.spinner("Procesando productos en bloque... (Esto tomará solo un segundo)"):
                             try:
-                                df = pd.read_excel(excel_file).fillna("")
-                                regs_exitosos = 0
+                                # Leemos el excel saltando la fila 2 (índice 1) que es la de los ejemplos
+                                df = pd.read_excel(excel_file, skiprows=[1]).fillna("")
+                                
+                                # Auto-aprendizaje Masivo de Configuraciones
+                                nombres_cat_db = [c['nombre'] for c in mis_categorias]
+                                nombres_col_db = [c['nombre'] for c in mis_colores]
+                                nombres_cur_db = [c['nombre'] for c in mis_curvas]
+                                
+                                nuevas_cats, nuevas_cols, nuevas_curvas = [], [], []
+                                cats_vistas, cols_vistas, curvas_vistas = set(), set(), set()
+                                
+                                productos_a_insertar = []
                                 
                                 for index, row in df.iterrows():
                                     cat_xls = str(row.get("Categoría", "")).strip()
                                     art_xls = str(row.get("Artículo", "")).strip()
                                     col_xls = str(row.get("Color", "")).strip()
                                     
-                                    if not art_xls or not cat_xls: continue # Evitar filas vacías
+                                    if not art_xls or not cat_xls: continue # Si la fila está en blanco, se salta
                                     
-                                    # Auto-aprendizaje
-                                    if cat_xls not in [c['nombre'] for c in mis_categorias]:
-                                        supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_xls}).execute()
-                                        mis_categorias.append({"nombre": cat_xls}) # Actualizar en memoria
-                                    if col_xls and col_xls not in [c['nombre'] for c in mis_colores]:
-                                        supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_xls}).execute()
-                                        mis_colores.append({"nombre": col_xls})
+                                    # Preparar nueva categoría
+                                    if cat_xls not in nombres_cat_db and cat_xls not in cats_vistas:
+                                        nuevas_cats.append({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_xls})
+                                        cats_vistas.add(cat_xls)
+                                        
+                                    # Preparar nuevo color
+                                    if col_xls and col_xls not in nombres_col_db and col_xls not in cols_vistas:
+                                        nuevas_cols.append({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_xls})
+                                        cols_vistas.add(col_xls)
                                         
                                     t_curva = str(row.get("Tipo Curva", "Sin Curva (N/A)")).strip()
                                     t_desde = str(row.get("Talle Desde", "N/A")).strip()
                                     t_hasta = str(row.get("Talle Hasta", "N/A")).strip()
                                     cantidades = str(row.get("Cantidades (Ej: 2-2-3-2-2-1)", "N/A")).strip()
                                     
-                                    # Auto-aprendizaje de curva
+                                    # Preparar nueva curva
                                     nombre_curva_xls = f"Excel: {cat_xls} {col_xls}"
-                                    if t_curva != "Sin Curva (N/A)" and cantidades != "N/A":
+                                    if t_curva != "Sin Curva (N/A)" and cantidades != "N/A" and nombre_curva_xls not in nombres_cur_db and nombre_curva_xls not in curvas_vistas:
                                         val_curva_xls = f"{t_curva}|{t_desde}|{t_hasta}|{cantidades}"
-                                        supabase.table("configuraciones_fabrica").insert({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_curva_xls, "valor": val_curva_xls}).execute()
+                                        nuevas_curvas.append({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_curva_xls, "valor": val_curva_xls})
+                                        curvas_vistas.add(nombre_curva_xls)
 
                                     precio_xls = row.get("Precio", 0)
                                     precio_xls = float(precio_xls) if str(precio_xls).replace('.','',1).isdigit() else 0.0
@@ -429,18 +462,26 @@ else:
                                     f_url = str(row.get("URL Foto (Opcional)", "")).strip()
                                     v_url = str(row.get("URL Video (Opcional)", "")).strip()
                                     
-                                    nuevo_prod = {
+                                    # Empaquetar el producto para el Bulk Insert
+                                    productos_a_insertar.append({
                                         "proveedor": st.session_state.usuario_actual, "categoria": cat_xls, "articulo": art_xls, "color": col_xls, 
                                         "descripcion": str(row.get("Descripción", "")).strip(), "precio": precio_xls,
                                         "talle_desde": t_desde, "talle_hasta": t_hasta, "curva": cantidades, "foto_url": f_url if f_url else None, "video_url": v_url if v_url else None
-                                    }
-                                    supabase.table("productos").insert(nuevo_prod).execute()
-                                    regs_exitosos += 1
-                                    
-                                st.success(f"✅ ¡{regs_exitosos} productos cargados exitosamente! Redirigiendo al catálogo...")
+                                    })
+                                
+                                # DISPARO MASIVO (BULK INSERT) - ¡Súper rápido!
+                                if nuevas_cats: supabase.table("configuraciones_fabrica").insert(nuevas_cats).execute()
+                                if nuevas_cols: supabase.table("configuraciones_fabrica").insert(nuevas_cols).execute()
+                                if nuevas_curvas: supabase.table("configuraciones_fabrica").insert(nuevas_curvas).execute()
+                                
+                                if productos_a_insertar:
+                                    supabase.table("productos").insert(productos_a_insertar).execute()
+                                
+                                st.success(f"✅ ¡Se procesaron {len(productos_a_insertar)} productos en tiempo récord! Redirigiendo al catálogo...")
                                 time.sleep(2)
                                 st.session_state.panel_privado = "catalogo"
                                 st.rerun()
+                                
                             except Exception as e:
                                 st.error(f"Error procesando el archivo: {e}")
 
