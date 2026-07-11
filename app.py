@@ -17,6 +17,8 @@ st.markdown("""
     <style>
         [data-testid="stFileUploader"] small {display: none !important;}
         [data-testid="stFileUploaderDropzoneInstructions"] > div > span {display: none !important;}
+        /* Ajustar espaciado vertical del catálogo */
+        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -53,51 +55,124 @@ if st.session_state.usuario_actual is None and "uid" in st.query_params:
     except:
         pass
 
-def enviar_correo_recuperacion(destinatario, nueva_clave):
-    url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
-    payload = {"destinatario": destinatario, "clave": nueva_clave}
+# ========================================================
+# VENTANAS FLOTANTES (POP-UPS DE EDICIÓN Y AMPLIACIÓN)
+# ========================================================
+@st.dialog("Renombrar Categoría")
+def dialog_editar_categoria(c_id, viejo_nombre):
+    st.write(f"Modificando: **{viejo_nombre}**")
+    nuevo_nombre = st.text_input("Nuevo nombre:", value=viejo_nombre).strip()
+    if st.button("Guardar Cambios", type="primary"):
+        if nuevo_nombre and nuevo_nombre != viejo_nombre:
+            # Actualizamos la configuración
+            supabase.table("configuraciones_fabrica").update({"nombre": nuevo_nombre}).eq("id", c_id).execute()
+            # Actualizamos todos los productos que usaban el nombre viejo
+            supabase.table("productos").update({"categoria": nuevo_nombre}).eq("proveedor", st.session_state.usuario_actual).eq("categoria", viejo_nombre).execute()
+            st.success("¡Categoría actualizada en todo el catálogo!")
+            time.sleep(1.5)
+            st.rerun()
+
+@st.dialog("Editar Producto")
+def dialog_editar_producto(p):
+    n_art = st.text_input("Artículo", value=p['articulo'])
+    n_col = st.text_input("Color", value=p.get('color',''))
+    n_desc = st.text_input("Descripción", value=p.get('descripcion',''))
+    n_precio = st.number_input("Precio ($)", value=float(p['precio']))
+    n_vid = st.text_input("URL Video YouTube", value=p.get('video_url', '') or '')
+    
+    if st.button("Guardar Cambios", type="primary", use_container_width=True):
+        supabase.table("productos").update({
+            "articulo": n_art, "color": n_col, "descripcion": n_desc, 
+            "precio": n_precio, "video_url": n_vid
+        }).eq("id", p['id']).execute()
+        st.success("¡Guardado!")
+        time.sleep(1)
+        st.rerun()
+
+@st.dialog("Vista Ampliada")
+def dialog_ampliar_imagen(url, articulo):
+    st.markdown(f"### {articulo}")
+    st.image(url, use_container_width=True)
+
+# ========================================================
+# GENERADOR DE PDF
+# ========================================================
+@st.cache_data(show_spinner=False)
+def generar_pdf_catalogo(productos, marca):
     try:
-        respuesta = requests.post(url_google_script, json=payload, timeout=10)
-        if respuesta.status_code == 200 and respuesta.json().get("estado") == "ok": return True, "OK"
-        return False, "Error en el script de Google"
-    except Exception as e: return False, str(e)
+        from fpdf import FPDF
+    except ImportError:
+        return None
+        
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    pdf.set_font("helvetica", style="B", size=18)
+    pdf.cell(0, 12, f"CATÁLOGO MAYORISTA - {marca}", ln=True, align="C")
+    pdf.ln(5)
+    
+    for p in productos:
+        x_start = pdf.get_x()
+        y_start = pdf.get_y()
+        
+        # Salto de página si no entra el renglón
+        if y_start > 250:
+            pdf.add_page()
+            y_start = pdf.get_y()
+            
+        # Caja contenedora
+        pdf.set_draw_color(220, 220, 220)
+        pdf.rect(10, y_start, 190, 35)
+        
+        # Descarga e incrustación de imagen
+        if p.get('foto_url'):
+            try:
+                resp = requests.get(p['foto_url'], timeout=3)
+                if resp.status_code == 200:
+                    img_stream = io.BytesIO(resp.content)
+                    pdf.image(img_stream, x=12, y=y_start+2, w=30, h=30)
+            except:
+                pass
+                
+        # Textos
+        pdf.set_xy(45, y_start + 4)
+        pdf.set_font("helvetica", style="B", size=12)
+        pdf.cell(110, 6, f"{p['articulo']} - {p.get('color','')}", ln=False)
+        
+        pdf.set_font("helvetica", style="B", size=14)
+        pdf.set_text_color(0, 128, 0)
+        pdf.cell(0, 6, f"${p['precio']:,.0f}", ln=True, align="R")
+        pdf.set_text_color(0, 0, 0)
+        
+        pdf.set_xy(45, y_start + 12)
+        pdf.set_font("helvetica", size=10)
+        pdf.cell(0, 5, f"Cat: {p.get('categoria','')} | Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=True)
+        
+        pdf.set_xy(45, y_start + 18)
+        pdf.set_font("helvetica", style="I", size=9)
+        pdf.cell(0, 5, f"Curva: {p.get('curva','')}", ln=True)
+        
+        pdf.set_xy(45, y_start + 24)
+        pdf.set_font("helvetica", size=9)
+        desc = str(p.get('descripcion',''))[:80] + "..." if len(str(p.get('descripcion',''))) > 80 else str(p.get('descripcion',''))
+        pdf.cell(0, 5, desc, ln=True)
+        
+        pdf.set_y(y_start + 40)
+        
+    return bytearray(pdf.output())
 
-def generar_lista_talles(tipo, d, h):
-    if "Sin Curva" in tipo: return []
-    elif "Numérica Simple" in tipo:
-        return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
-    elif "Doble Par" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(12, 54, 2)]
-        if d in lista and h in lista and lista.index(h) >= lista.index(d):
-            return lista[lista.index(d) : lista.index(h)+1]
-        return []
-    elif "Doble Impar" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(13, 55, 2)]
-        if d in lista and h in lista and lista.index(h) >= lista.index(d):
-            return lista[lista.index(d) : lista.index(h)+1]
-        return []
-    elif "Alfabética" in tipo:
-        lista = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-        if d in lista and h in lista and lista.index(h) >= lista.index(d):
-            return lista[lista.index(d) : lista.index(h)+1]
-        return []
-    return []
-
-# --- CACHÉ DE PLANTILLA EXCEL PARA AHORRAR MEMORIA RAM ---
+# ========================================================
+# CACHÉ DE PLANTILLA EXCEL
+# ========================================================
 @st.cache_data(show_spinner=False)
 def obtener_plantilla_excel():
     df_template = pd.DataFrame({
         "Categoría": ["Ej: Deportiva Goma"],
-        "Artículo": ["Zapa Urban"],
-        "Color": ["Negro"],
-        "Descripción": ["Suela inyectada, alta resistencia"],
-        "Precio": [15000], 
-        "Tipo Curva": ["Numérica Simple"],
-        "Talle Desde": ["35"],
-        "Talle Hasta (Mayor al Desde)": ["40"],
-        "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
-        "URL Foto (Opcional)": [""],
-        "URL Video (Opcional)": ["https://youtu.be/..."]
+        "Artículo": ["Zapa Urban"], "Color": ["Negro"], "Descripción": ["Suela inyectada"],
+        "Precio": [15000], "Tipo Curva": ["Numérica Simple"], "Talle Desde": ["35"],
+        "Talle Hasta (Mayor al Desde)": ["40"], "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
+        "URL Foto (Opcional)": [""], "URL Video (Opcional)": ["https://youtu.be/..."]
     })
     
     buffer = io.BytesIO()
@@ -132,10 +207,8 @@ def obtener_plantilla_excel():
 
         for i in range(max_len):
             row = [
-                num_simple[i] if i < len(num_simple) else "",
-                doble_par[i] if i < len(doble_par) else "",
-                doble_impar[i] if i < len(doble_impar) else "",
-                alfabetica[i] if i < len(alfabetica) else "",
+                num_simple[i] if i < len(num_simple) else "", doble_par[i] if i < len(doble_par) else "",
+                doble_impar[i] if i < len(doble_impar) else "", alfabetica[i] if i < len(alfabetica) else "",
                 sin_curva[i] if i < len(sin_curva) else ""
             ]
             ws_listas.append(row)
@@ -222,23 +295,6 @@ if st.session_state.usuario_actual is None:
                         else: st.error("❌ Correo ya registrado.")
                     else: st.warning("Revisa los datos.")
 
-    elif st.session_state.seccion_publica == "recuperar":
-        col_rec = st.columns([1, 2, 1])[1]
-        with col_rec:
-            with st.form("recup_form"):
-                st.subheader("Recuperar Clave")
-                email_recup = st.text_input("Correo").strip().lower()
-                if st.form_submit_button("Enviar"):
-                    res = supabase.table("usuarios").select("id").eq("email", email_recup).execute()
-                    if res.data:
-                        tmp = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(6))
-                        exito, _ = enviar_correo_recuperacion(email_recup, tmp)
-                        if exito:
-                            supabase.table("usuarios").update({"contrasena": tmp}).eq("email", email_recup).execute()
-                            st.success("✅ Correo enviado.")
-                        else: st.error("Error al enviar.")
-                    else: st.error("No existe la cuenta.")
-
 # ========================================================
 # FLUX 2: ENTORNO PRIVADO
 # ========================================================
@@ -304,23 +360,37 @@ else:
             # CARGA MANUAL
             # ----------------------------------------
             if tipo_carga == "Carga Manual (Uno a Uno)":
-                with st.expander("⚙️ Administrar mis Listas (Eliminar categorías, colores o curvas)"):
+                with st.expander("⚙️ Administrar mis Listas (Editar/Eliminar)"):
                     col_m1, col_m2, col_m3 = st.columns(3)
                     with col_m1:
                         st.markdown("**Categorías**")
                         for c in mis_categorias:
-                            if st.button(f"❌ {c['nombre']}", key=f"del_cat_{c['id']}"):
-                                supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
+                            cA, cB, cC = st.columns([5, 2, 2])
+                            with cA: st.write(c['nombre'])
+                            with cB: 
+                                if st.button("✏️", key=f"ed_cat_{c['id']}"): dialog_editar_categoria(c['id'], c['nombre'])
+                            with cC:
+                                if st.button("❌", key=f"del_cat_{c['id']}"): 
+                                    supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute()
+                                    st.rerun()
                     with col_m2:
                         st.markdown("**Colores**")
                         for c in mis_colores:
-                            if st.button(f"❌ {c['nombre']}", key=f"del_col_{c['id']}"):
-                                supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
+                            cA, cB = st.columns([7, 2])
+                            with cA: st.write(c['nombre'])
+                            with cB:
+                                if st.button("❌", key=f"del_col_{c['id']}"): 
+                                    supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute()
+                                    st.rerun()
                     with col_m3:
                         st.markdown("**Curvas**")
                         for c in mis_curvas:
-                            if st.button(f"❌ {c['nombre']}", key=f"del_curv_{c['id']}"):
-                                supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute(); st.rerun()
+                            cA, cB = st.columns([7, 2])
+                            with cA: st.write(c['nombre'])
+                            with cB:
+                                if st.button("❌", key=f"del_curv_{c['id']}"): 
+                                    supabase.table("configuraciones_fabrica").delete().eq("id", c['id']).execute()
+                                    st.rerun()
 
                 c_cat, c_col = st.columns(2)
                 with c_cat:
@@ -422,7 +492,19 @@ else:
                     es_nueva_curva = False
                     guardar_curva = False
                     nombre_nueva_curva = ""
-                    talles_list_str = generar_lista_talles(tipo_curva_sel, t_d_sel, t_h_sel)
+                    
+                    if "Sin Curva" in tipo_curva_sel: talles_list_str = []
+                    elif "Numérica" in tipo_curva_sel: talles_list_str = [str(i) for i in range(int(t_d_sel), int(t_h_sel)+1)]
+                    elif "Par" in tipo_curva_sel: 
+                        l = [f"{i}/{i+1}" for i in range(12, 54, 2)]
+                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
+                    elif "Impar" in tipo_curva_sel:
+                        l = [f"{i}/{i+1}" for i in range(13, 55, 2)]
+                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
+                    elif "Alfabética" in tipo_curva_sel:
+                        l = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
+                    else: talles_list_str = []
 
                 if "Sin Curva" in tipo_curva_sel:
                     st.info("📌 Este producto se guardará sin numeración específica.")
@@ -487,19 +569,17 @@ else:
                                 st.error(f"Error al guardar: {e}")
 
             # ----------------------------------------
-            # CARGA MASIVA (EXCEL) - CON FORMULARIO ESCUDO Y CACHÉ
+            # CARGA MASIVA (EXCEL)
             # ----------------------------------------
             elif tipo_carga == "Carga Masiva (Excel)":
                 st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El Excel viene equipado con desplegables inteligentes que cambian automáticamente según el Tipo de Curva.")
                 
-                # Obtenemos la plantilla del caché (No consume memoria extra)
                 excel_bytes = obtener_plantilla_excel()
                 
                 st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=excel_bytes, file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 st.write("---")
                 
-                # FORMULARIO ESCUDO: Evita que la página se recargue al soltar el archivo
                 with st.form("form_carga_masiva"):
                     excel_file = st.file_uploader("Sube tu archivo Excel lleno", type=["xlsx", "xls"])
                     btn_procesar = st.form_submit_button("🚀 Iniciar Procesamiento Masivo", type="primary")
@@ -574,56 +654,78 @@ else:
                 elif btn_procesar and excel_file is None:
                     st.warning("⚠️ Primero arrastra un archivo a la zona de carga.")
 
-        # PESTAÑA 2: CATÁLOGO AGRUPADO
+        # PESTAÑA 2: CATÁLOGO AGRUPADO Y VISTA COMPACTA
         elif st.session_state.panel_privado == "catalogo":
-            st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
-            st.subheader("Artículos Publicados")
+            colTitulo, colPDF = st.columns([3, 1])
+            with colTitulo:
+                st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
+            
             res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
             
             if res_prod.data:
                 productos = res_prod.data
+                
+                # Botón de PDF Dinámico
+                with colPDF:
+                    st.write("") 
+                    pdf_bytes = generar_pdf_catalogo(productos, st.session_state.marca_actual)
+                    if pdf_bytes:
+                        st.download_button(label="📥 Exportar a PDF", data=pdf_bytes, file_name="Catalogo_NotPed.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                    else:
+                        st.warning("El motor PDF se está instalando. Actualiza la página.")
+
+                st.write("---")
                 categorias_presentes = sorted(list(set([p.get('categoria', 'General') for p in productos])))
                 
                 for cat_name in categorias_presentes:
-                    st.markdown(f"### 📁 {cat_name}")
+                    st.markdown(f"<h3 style='color: #4A90E2;'>📁 {cat_name}</h3>", unsafe_allow_html=True)
                     prods_cat = [p for p in productos if p.get('categoria', 'General') == cat_name]
                     
                     for p in prods_cat:
                         with st.container(border=True):
-                            c1, c2, c3, c4 = st.columns([1, 2, 2, 1])
+                            # Estructura de UN RENGLÓN (5 columnas horizontales)
+                            c1, c2, c3, c4, c5 = st.columns([1.5, 3.5, 3, 1.5, 1])
+                            
                             with c1:
                                 if p.get("foto_url"): 
                                     st.image(p["foto_url"], use_container_width=True)
+                                    if st.button("🔍 Ampliar", key=f"amp_{p['id']}", use_container_width=True):
+                                        dialog_ampliar_imagen(p["foto_url"], p['articulo'])
                                 else:
-                                    st.warning("🖼️ Foto Pendiente")
-                                    img_up = st.file_uploader("Subir JPG/PNG", type=["jpg", "png", "jpeg"], key=f"up_{p['id']}")
+                                    st.warning("Foto Pendiente")
+                                    img_up = st.file_uploader("Subir", type=["jpg", "png", "jpeg"], key=f"up_{p['id']}")
                                     if img_up:
-                                        with st.spinner("Subiendo..."):
-                                            extension = img_up.name.split('.')[-1]
-                                            nombre_archivo = f"{uuid.uuid4()}.{extension}"
-                                            supabase.storage.from_("fotos_productos").upload(nombre_archivo, img_up.getvalue(), {"content-type": img_up.type})
-                                            f_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
-                                            supabase.table("productos").update({"foto_url": f_url}).eq("id", p['id']).execute()
-                                            st.rerun()
+                                        extension = img_up.name.split('.')[-1]
+                                        nombre_archivo = f"{uuid.uuid4()}.{extension}"
+                                        supabase.storage.from_("fotos_productos").upload(nombre_archivo, img_up.getvalue(), {"content-type": img_up.type})
+                                        f_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
+                                        supabase.table("productos").update({"foto_url": f_url}).eq("id", p['id']).execute()
+                                        st.rerun()
 
                             with c2:
-                                st.markdown(f"**{p['articulo']}** | {p.get('color', '')}")
-                                st.write(p.get("descripcion", ""))
-                                st.markdown(f"<h4 style='color: #28a745;'>${p['precio']:,.0f}</h4>", unsafe_allow_html=True)
+                                st.markdown(f"**{p['articulo']}**  |  {p.get('color', '')}")
+                                st.caption(p.get("descripcion", ""))
                                 if p.get("video_url"):
                                     st.markdown(f"[▶️ Ver Video en YouTube]({p['video_url']})")
+                            
                             with c3:
                                 if p.get("curva") == "N/A":
-                                    st.write("**Curva de Talles:**")
-                                    st.code("N/A - Sin Curva Específica")
+                                    st.caption("**Sin Curva**")
                                 else:
-                                    st.write("**Curva de Talles:**")
-                                    st.code(f"Talles: {p['talle_desde']} a {p['talle_hasta']}\nCantidades: {p['curva']}")
+                                    st.caption(f"Talles: {p['talle_desde']} al {p['talle_hasta']}")
+                                    st.code(f"Curva: {p['curva']}")
+                            
                             with c4:
-                                if st.button("🗑️ Borrar", key=f"del_prod_{p['id']}", type="primary"):
+                                st.markdown(f"<h3 style='color: #28a745; margin-top: 0;'>${p['precio']:,.0f}</h3>", unsafe_allow_html=True)
+                            
+                            with c5:
+                                # Botones de Acción verticalmente alineados
+                                if st.button("✏️", key=f"ed_prod_{p['id']}", help="Editar Artículo", use_container_width=True):
+                                    dialog_editar_producto(p)
+                                if st.button("🗑️", key=f"del_prod_{p['id']}", help="Eliminar", use_container_width=True):
                                     supabase.table("productos").delete().eq("id", p['id']).execute()
                                     st.rerun()
-                    st.write("---")
+                    st.write("") # Espaciador entre categorías
             else:
                 st.info("Aún no tienes productos en tu catálogo.")
 
