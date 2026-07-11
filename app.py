@@ -32,8 +32,13 @@ if "usuario_actual" not in st.session_state: st.session_state.usuario_actual = N
 if "rol_actual" not in st.session_state: st.session_state.rol_actual = None
 if "marca_actual" not in st.session_state: st.session_state.marca_actual = None
 if "form_key" not in st.session_state: st.session_state.form_key = 0 
+if "seccion_publica" not in st.session_state: st.session_state.seccion_publica = "inicio"
+if "panel_privado" not in st.session_state: st.session_state.panel_privado = "carga"
 
 fk = st.session_state.form_key 
+
+# Garantizar URL limpia siempre
+st.query_params.clear()
 
 def enviar_correo_recuperacion(destinatario, nueva_clave):
     url_google_script = "https://script.google.com/macros/s/AKfycbxrQT5YiENHleJRr8d5ORF6VnUumzLsLvzKJYpl2vSSOl0D2eh65_D99nExatQCnR6DCg/exec" 
@@ -69,29 +74,27 @@ def generar_lista_talles(tipo, d, h):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    ruta_publica = st.query_params.get("sec", "inicio")
-    st.query_params.clear()
     
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
     with col_nav:
         sub_col1, sub_col2, sub_col3 = st.columns(3)
         with sub_col1:
-            if st.button("🏠 Inicio", use_container_width=True): st.query_params["sec"] = "inicio"; st.rerun()
+            if st.button("🏠 Inicio", use_container_width=True): st.session_state.seccion_publica = "inicio"; st.rerun()
         with sub_col2:
-            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.query_params["sec"] = "login"; st.rerun()
+            if st.button("🔐 Iniciar Sesión", use_container_width=True): st.session_state.seccion_publica = "login"; st.rerun()
         with sub_col3:
-            if st.button("📝 Registrarse", use_container_width=True): st.query_params["sec"] = "registro"; st.rerun()
+            if st.button("📝 Registrarse", use_container_width=True): st.session_state.seccion_publica = "registro"; st.rerun()
     st.write("---")
 
-    if ruta_publica == "inicio":
+    if st.session_state.seccion_publica == "inicio":
         st.title("🚀 Conectamos Fábricas de Calzado con Revendedores")
         st.write("")
         col_b1, col_b2 = st.columns(2)
         with col_b1: st.info("🏭 **FÁBRICA DESTACADA A**\n\nNueva Colección Primavera-Verano. Lanzamientos exclusivos.")
         with col_b2: st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
 
-    elif ruta_publica == "login":
+    elif st.session_state.seccion_publica == "login":
         col_login = st.columns([1, 2, 1])[1]
         with col_login:
             with st.form("login_form"):
@@ -104,12 +107,12 @@ if st.session_state.usuario_actual is None:
                         st.session_state.usuario_actual = res.data[0]["email"]
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
-                        st.query_params["panel"] = "carga"
+                        st.session_state.panel_privado = "carga"
                         st.rerun()
                     else: st.error("❌ Datos incorrectos.")
-            if st.button("¿Olvidaste tu contraseña?"): st.query_params["sec"] = "recuperar"; st.rerun()
+            if st.button("¿Olvidaste tu contraseña?"): st.session_state.seccion_publica = "recuperar"; st.rerun()
 
-    elif ruta_publica == "registro":
+    elif st.session_state.seccion_publica == "registro":
         col_reg = st.columns([1, 2, 1])[1]
         with col_reg:
             with st.form("reg_form"):
@@ -127,12 +130,12 @@ if st.session_state.usuario_actual is None:
                             supabase.table("usuarios").insert({"email": email, "contrasena": p1, "rol": rol, "nombre_marca": marca}).execute()
                             st.success("✅ Cuenta creada. Redirigiendo al inicio de sesión...")
                             time.sleep(1.5)
-                            st.query_params["sec"] = "login"
+                            st.session_state.seccion_publica = "login"
                             st.rerun()
                         else: st.error("❌ Correo ya registrado.")
                     else: st.warning("Revisa los datos.")
 
-    elif ruta_publica == "recuperar":
+    elif st.session_state.seccion_publica == "recuperar":
         col_rec = st.columns([1, 2, 1])[1]
         with col_rec:
             with st.form("recup_form"):
@@ -153,9 +156,6 @@ if st.session_state.usuario_actual is None:
 # FLUX 2: ENTORNO PRIVADO
 # ========================================================
 else:
-    ruta_privada = st.query_params.get("panel", "carga")
-    st.query_params.clear()
-
     with st.sidebar:
         st.markdown(f"### {st.session_state.marca_actual}")
         st.write(f"*{st.session_state.usuario_actual}*")
@@ -163,10 +163,10 @@ else:
         if st.session_state.rol_actual == "proveedor":
             st.success("🏭 Panel Fábrica")
             st.write("---")
-            if st.button("🏠 Portada Principal", use_container_width=True): st.query_params["panel"] = "portada"; st.rerun()
-            if st.button("➕ Cargar Calzado", use_container_width=True): st.query_params["panel"] = "carga"; st.rerun()
-            if st.button("👞 Mi Catálogo", use_container_width=True): st.query_params["panel"] = "catalogo"; st.rerun()
-            if st.button("👥 Mis Revendedores", use_container_width=True): st.query_params["panel"] = "clientes"; st.rerun()
+            if st.button("🏠 Portada Principal", use_container_width=True): st.session_state.panel_privado = "portada"; st.rerun()
+            if st.button("➕ Cargar Calzado", use_container_width=True): st.session_state.panel_privado = "carga"; st.rerun()
+            if st.button("👞 Mi Catálogo", use_container_width=True): st.session_state.panel_privado = "catalogo"; st.rerun()
+            if st.button("👥 Mis Revendedores", use_container_width=True): st.session_state.panel_privado = "clientes"; st.rerun()
         
         elif st.session_state.rol_actual == "revendedor": st.warning("🛒 Panel Revendedor")
         else: st.info("👑 Admin")
@@ -174,7 +174,6 @@ else:
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.clear()
-            st.query_params["sec"] = "inicio"
             st.rerun()
 
     if st.session_state.rol_actual == "proveedor":
@@ -185,7 +184,7 @@ else:
         mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
         
         # PESTAÑA: PORTADA PUBLICA
-        if ruta_privada == "portada":
+        if st.session_state.panel_privado == "portada":
             st.title("🚀 Portada Comercial - NotPed")
             st.write("Así ven tu plataforma los visitantes no registrados:")
             st.write("")
@@ -194,7 +193,7 @@ else:
             with col_b2: st.success("🏭 **FÁBRICA DESTACADA B**\n\nEspecialistas en Línea Urbana y Deportiva. Envíos inmediatos.")
 
         # PESTAÑA 1: CARGA DE CALZADO
-        elif ruta_privada == "carga":
+        elif st.session_state.panel_privado == "carga":
             st.title(f"🏭 Panel Fábrica | Carga de Calzado")
             
             tipo_carga = st.radio("Modo de Carga", ["Carga Manual (Uno a Uno)", "Carga Masiva (Excel)"], horizontal=True)
@@ -364,7 +363,7 @@ else:
                                 st.session_state.form_key += 1
                                 st.success("✅ ¡Producto cargado con éxito! Redirigiendo al catálogo...")
                                 time.sleep(1.2)
-                                st.query_params["panel"] = "catalogo"
+                                st.session_state.panel_privado = "catalogo"
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al guardar: {e}")
@@ -440,13 +439,13 @@ else:
                                     
                                 st.success(f"✅ ¡{regs_exitosos} productos cargados exitosamente! Redirigiendo al catálogo...")
                                 time.sleep(2)
-                                st.query_params["panel"] = "catalogo"
+                                st.session_state.panel_privado = "catalogo"
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error procesando el archivo: {e}")
 
         # PESTAÑA 2: CATÁLOGO AGRUPADO
-        elif ruta_privada == "catalogo":
+        elif st.session_state.panel_privado == "catalogo":
             st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
             st.subheader("Artículos Publicados")
             res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
@@ -499,7 +498,7 @@ else:
                 st.info("Aún no tienes productos en tu catálogo.")
 
         # PESTAÑA 3: REVENDEDORES
-        elif ruta_privada == "clientes":
+        elif st.session_state.panel_privado == "clientes":
             st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
             st.subheader("Mis Clientes Autorizados")
             st.info("Próximamente: Aquí verás las notas de pedido que te envíen los revendedores, y podrás asignarles bonificaciones.")
