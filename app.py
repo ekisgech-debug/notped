@@ -63,11 +63,32 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
         return False, "Error en el script de Google"
     except Exception as e: return False, str(e)
 
+def generar_lista_talles(tipo, d, h):
+    if "Sin Curva" in tipo: return []
+    elif "Numérica Simple" in tipo:
+        return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
+    elif "Doble Par" in tipo:
+        lista = [f"{i}/{i+1}" for i in range(12, 54, 2)]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    elif "Doble Impar" in tipo:
+        lista = [f"{i}/{i+1}" for i in range(13, 55, 2)]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    elif "Alfabética" in tipo:
+        lista = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+        if d in lista and h in lista and lista.index(h) >= lista.index(d):
+            return lista[lista.index(d) : lista.index(h)+1]
+        return []
+    return []
+
 # ========================================================
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    st.query_params.clear() # Limpia la URL solo en la zona pública
+    st.query_params.clear() # Limpia la URL solo si estás fuera de sesión
     
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
@@ -108,7 +129,6 @@ if st.session_state.usuario_actual is None:
                         if recordar: st.session_state.remember_email = u_email
                         else: st.session_state.remember_email = ""
                         
-                        # Guardamos el UID en la URL para protección F5
                         st.query_params["uid"] = str(res.data[0]["id"])
                         st.query_params["panel"] = "carga"
                         st.rerun()
@@ -188,7 +208,9 @@ else:
             
         st.write("---")
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
-            st.session_state.usuario_actual = None
+            rem_email = st.session_state.get("remember_email", "")
+            st.session_state.clear()
+            st.session_state.remember_email = rem_email
             st.query_params.clear()
             st.rerun()
 
@@ -287,7 +309,7 @@ else:
                         
                     elif tipo_curva_sel == "Numérica Simple":
                         t_d_sel = cd.number_input("Desde", min_value=1, max_value=120, value=35, key=f"n_d_{fk}")
-                        t_h_sel = ch.number_input("Hasta", min_value=t_d_sel, max_value=120, value=max(t_d_sel+5, 40), key=f"n_h_{fk}")
+                        t_h_sel = ch.number_input("Hasta", min_value=t_d_sel, max_value=120, value=min(t_d_sel+5, 120), key=f"n_h_{fk}")
                         t_d_sel, t_h_sel = str(t_d_sel), str(t_h_sel)
                         talles_list_str = [str(i) for i in range(int(t_d_sel), int(t_h_sel)+1)]
 
@@ -295,7 +317,7 @@ else:
                         lst = [f"{i}/{i+1}" for i in range(12, 54, 2)]
                         t_d_sel = cd.selectbox("Desde", lst, index=11, key=f"dp_d_{fk}")
                         idx_d = lst.index(t_d_sel)
-                        idx_h_def = idx_d + 1 if idx_d + 1 < len(lst) else idx_d # Hasta inteligente
+                        idx_h_def = idx_d + 1 if idx_d + 1 < len(lst) else idx_d
                         t_h_sel = ch.selectbox("Hasta", lst, index=idx_h_def, key=f"dp_h_{fk}")
                         idx_h = lst.index(t_h_sel)
                         talles_list_str = lst[idx_d : idx_h+1] if idx_h >= idx_d else []
@@ -336,20 +358,7 @@ else:
                     es_nueva_curva = False
                     guardar_curva = False
                     nombre_nueva_curva = ""
-                    
-                    # Generar lista por retrocompatibilidad si carga guardada
-                    if "Sin Curva" in tipo_curva_sel: talles_list_str = []
-                    elif "Numérica" in tipo_curva_sel: talles_list_str = [str(i) for i in range(int(t_d_sel), int(t_h_sel)+1)]
-                    elif "Par" in tipo_curva_sel: 
-                        l = [f"{i}/{i+1}" for i in range(12, 54, 2)]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    elif "Impar" in tipo_curva_sel:
-                        l = [f"{i}/{i+1}" for i in range(13, 55, 2)]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    elif "Alfabética" in tipo_curva_sel:
-                        l = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    else: talles_list_str = []
+                    talles_list_str = generar_lista_talles(tipo_curva_sel, t_d_sel, t_h_sel)
 
                 if "Sin Curva" in tipo_curva_sel:
                     st.info("📌 Este producto se guardará sin numeración específica.")
@@ -476,8 +485,8 @@ else:
                         ]
                         ws_listas.append(row)
 
-                    # 3. Validación Dependiente Avanzada (Columnas G y H)
-                    formula_talles = '=IF(LEFT(F3,4)="Numé",Listas!$A$2:$A$121,IF(LEFT(F3,7)="Doble P",Listas!$B$2:$B$22,IF(LEFT(F3,7)="Doble I",Listas!$C$2:$C$22,IF(LEFT(F3,4)="Alfa",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
+                    # 3. Validación Dependiente Avanzada REPARADA (El truco del $F3 bloquea la evaluación relativa horizontal)
+                    formula_talles = '=IF($F3="Numérica Simple",Listas!$A$2:$A$121,IF($F3="Doble Par",Listas!$B$2:$B$22,IF($F3="Doble Impar",Listas!$C$2:$C$22,IF($F3="Alfabética",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
                     dv_talles = DataValidation(type="list", formula1=formula_talles, allow_blank=True)
                     worksheet.add_data_validation(dv_talles)
                     dv_talles.add('G3:H1048576')
