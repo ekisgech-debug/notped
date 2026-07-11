@@ -2,3 +2,4 @@ streamlit
 supabase
 pandas
 openpyxl
+fpdf2==2.7.9
