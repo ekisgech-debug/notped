@@ -64,9 +64,7 @@ def dialog_editar_categoria(c_id, viejo_nombre):
     nuevo_nombre = st.text_input("Nuevo nombre:", value=viejo_nombre).strip()
     if st.button("Guardar Cambios", type="primary"):
         if nuevo_nombre and nuevo_nombre != viejo_nombre:
-            # Actualizamos la configuración
             supabase.table("configuraciones_fabrica").update({"nombre": nuevo_nombre}).eq("id", c_id).execute()
-            # Actualizamos todos los productos que usaban el nombre viejo
             supabase.table("productos").update({"categoria": nuevo_nombre}).eq("proveedor", st.session_state.usuario_actual).eq("categoria", viejo_nombre).execute()
             st.success("¡Categoría actualizada en todo el catálogo!")
             time.sleep(1.5)
@@ -116,16 +114,13 @@ def generar_pdf_catalogo(productos, marca):
         x_start = pdf.get_x()
         y_start = pdf.get_y()
         
-        # Salto de página si no entra el renglón
         if y_start > 250:
             pdf.add_page()
             y_start = pdf.get_y()
             
-        # Caja contenedora
         pdf.set_draw_color(220, 220, 220)
         pdf.rect(10, y_start, 190, 35)
         
-        # Descarga e incrustación de imagen
         if p.get('foto_url'):
             try:
                 resp = requests.get(p['foto_url'], timeout=3)
@@ -135,7 +130,6 @@ def generar_pdf_catalogo(productos, marca):
             except:
                 pass
                 
-        # Textos
         pdf.set_xy(45, y_start + 4)
         pdf.set_font("helvetica", style="B", size=12)
         pdf.cell(110, 6, f"{p['articulo']} - {p.get('color','')}", ln=False)
@@ -160,7 +154,8 @@ def generar_pdf_catalogo(productos, marca):
         
         pdf.set_y(y_start + 40)
         
-    return bytearray(pdf.output())
+    # AQUÍ ESTÁ LA CORRECCIÓN CLAVE: Pasamos a 'bytes' puro
+    return bytes(pdf.output())
 
 # ========================================================
 # CACHÉ DE PLANTILLA EXCEL
@@ -219,7 +214,6 @@ def obtener_plantilla_excel():
         dv_talles.add('G3:H2000')
         
     return buffer.getvalue()
-
 
 # ========================================================
 # FLUX 1: ENTORNO PÚBLICO
@@ -492,19 +486,7 @@ else:
                     es_nueva_curva = False
                     guardar_curva = False
                     nombre_nueva_curva = ""
-                    
-                    if "Sin Curva" in tipo_curva_sel: talles_list_str = []
-                    elif "Numérica" in tipo_curva_sel: talles_list_str = [str(i) for i in range(int(t_d_sel), int(t_h_sel)+1)]
-                    elif "Par" in tipo_curva_sel: 
-                        l = [f"{i}/{i+1}" for i in range(12, 54, 2)]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    elif "Impar" in tipo_curva_sel:
-                        l = [f"{i}/{i+1}" for i in range(13, 55, 2)]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    elif "Alfabética" in tipo_curva_sel:
-                        l = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-                        talles_list_str = l[l.index(t_d_sel) : l.index(t_h_sel)+1] if t_d_sel in l and t_h_sel in l else []
-                    else: talles_list_str = []
+                    talles_list_str = generar_lista_talles(tipo_curva_sel, t_d_sel, t_h_sel)
 
                 if "Sin Curva" in tipo_curva_sel:
                     st.info("📌 Este producto se guardará sin numeración específica.")
