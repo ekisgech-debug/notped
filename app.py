@@ -83,6 +83,71 @@ def generar_lista_talles(tipo, d, h):
         return []
     return []
 
+# --- CACHÉ DE PLANTILLA EXCEL PARA AHORRAR MEMORIA RAM ---
+@st.cache_data(show_spinner=False)
+def obtener_plantilla_excel():
+    df_template = pd.DataFrame({
+        "Categoría": ["Ej: Deportiva Goma"],
+        "Artículo": ["Zapa Urban"],
+        "Color": ["Negro"],
+        "Descripción": ["Suela inyectada, alta resistencia"],
+        "Precio": [15000], 
+        "Tipo Curva": ["Numérica Simple"],
+        "Talle Desde": ["35"],
+        "Talle Hasta (Mayor al Desde)": ["40"],
+        "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
+        "URL Foto (Opcional)": [""],
+        "URL Video (Opcional)": ["https://youtu.be/..."]
+    })
+    
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_template.to_excel(writer, index=False, sheet_name='Plantilla')
+        worksheet = writer.sheets['Plantilla']
+        
+        for column in worksheet.columns:
+            max_length = 0
+            col_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                except: pass
+            worksheet.column_dimensions[col_letter].width = max_length + 2
+
+        dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par,Doble Impar,Alfabética,Sin Curva (N/A)"', allow_blank=True)
+        worksheet.add_data_validation(dv_tipo)
+        dv_tipo.add('F3:F2000') 
+
+        ws_listas = writer.book.create_sheet('Listas')
+        ws_listas.sheet_state = 'hidden'
+
+        num_simple = [str(i) for i in range(1, 121)]
+        doble_par = [f"{i}/{i+1}" for i in range(12, 54, 2)]
+        doble_impar = [f"{i}/{i+1}" for i in range(13, 55, 2)]
+        alfabetica = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+        sin_curva = ["N/A"]
+
+        ws_listas.append(["Num", "Par", "Impar", "Alfa", "Na"])
+        max_len = max(len(num_simple), len(doble_par), len(doble_impar), len(alfabetica), len(sin_curva))
+
+        for i in range(max_len):
+            row = [
+                num_simple[i] if i < len(num_simple) else "",
+                doble_par[i] if i < len(doble_par) else "",
+                doble_impar[i] if i < len(doble_impar) else "",
+                alfabetica[i] if i < len(alfabetica) else "",
+                sin_curva[i] if i < len(sin_curva) else ""
+            ]
+            ws_listas.append(row)
+
+        formula_talles = '=IF($F3="Numérica Simple",Listas!$A$2:$A$121,IF($F3="Doble Par",Listas!$B$2:$B$22,IF($F3="Doble Impar",Listas!$C$2:$C$22,IF($F3="Alfabética",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
+        dv_talles = DataValidation(type="list", formula1=formula_talles, allow_blank=True)
+        worksheet.add_data_validation(dv_talles)
+        dv_talles.add('G3:H2000')
+        
+    return buffer.getvalue()
+
+
 # ========================================================
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
@@ -422,148 +487,92 @@ else:
                                 st.error(f"Error al guardar: {e}")
 
             # ----------------------------------------
-            # CARGA MASIVA (EXCEL) - EXCEL INTELIGENTE CON MENÚS DEPENDIENTES
+            # CARGA MASIVA (EXCEL) - CON FORMULARIO ESCUDO Y CACHÉ
             # ----------------------------------------
             elif tipo_carga == "Carga Masiva (Excel)":
                 st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El Excel viene equipado con desplegables inteligentes que cambian automáticamente según el Tipo de Curva.")
                 
-                # Generar Plantilla Excel en memoria
-                df_template = pd.DataFrame({
-                    "Categoría": ["Ej: Deportiva Goma"],
-                    "Artículo": ["Zapa Urban"],
-                    "Color": ["Negro"],
-                    "Descripción": ["Suela inyectada, alta resistencia"],
-                    "Precio": [15000], 
-                    "Tipo Curva": ["Numérica Simple"],
-                    "Talle Desde": ["35"],
-                    "Talle Hasta (Mayor al Desde)": ["40"],
-                    "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
-                    "URL Foto (Opcional)": [""],
-                    "URL Video (Opcional)": ["https://youtu.be/..."]
-                })
+                # Obtenemos la plantilla del caché (No consume memoria extra)
+                excel_bytes = obtener_plantilla_excel()
                 
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_template.to_excel(writer, index=False, sheet_name='Plantilla')
-                    worksheet = writer.sheets['Plantilla']
-                    
-                    for column in worksheet.columns:
-                        max_length = 0
-                        col_letter = column[0].column_letter
-                        for cell in column:
-                            try:
-                                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
-                            except: pass
-                        worksheet.column_dimensions[col_letter].width = max_length + 2
-
-                    # 1. Validación Principal (Columna F limitada a 2000 filas para ahorrar memoria RAM)
-                    dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par,Doble Impar,Alfabética,Sin Curva (N/A)"', allow_blank=True)
-                    worksheet.add_data_validation(dv_tipo)
-                    dv_tipo.add('F3:F2000') 
-
-                    # 2. Hoja oculta con los datos en crudo para las validaciones dependientes
-                    ws_listas = writer.book.create_sheet('Listas')
-                    ws_listas.sheet_state = 'hidden'
-
-                    num_simple = [str(i) for i in range(1, 121)]
-                    doble_par = [f"{i}/{i+1}" for i in range(12, 54, 2)]
-                    doble_impar = [f"{i}/{i+1}" for i in range(13, 55, 2)]
-                    alfabetica = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-                    sin_curva = ["N/A"]
-
-                    ws_listas.append(["Num", "Par", "Impar", "Alfa", "Na"])
-                    max_len = max(len(num_simple), len(doble_par), len(doble_impar), len(alfabetica), len(sin_curva))
-
-                    for i in range(max_len):
-                        row = [
-                            num_simple[i] if i < len(num_simple) else "",
-                            doble_par[i] if i < len(doble_par) else "",
-                            doble_impar[i] if i < len(doble_impar) else "",
-                            alfabetica[i] if i < len(alfabetica) else "",
-                            sin_curva[i] if i < len(sin_curva) else ""
-                        ]
-                        ws_listas.append(row)
-
-                    # 3. Validación Dependiente Avanzada (Limitada a 2000 filas)
-                    formula_talles = '=IF($F3="Numérica Simple",Listas!$A$2:$A$121,IF($F3="Doble Par",Listas!$B$2:$B$22,IF($F3="Doble Impar",Listas!$C$2:$C$22,IF($F3="Alfabética",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
-                    dv_talles = DataValidation(type="list", formula1=formula_talles, allow_blank=True)
-                    worksheet.add_data_validation(dv_talles)
-                    dv_talles.add('G3:H2000')
-                
-                st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=excel_bytes, file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 st.write("---")
-                excel_file = st.file_uploader("Sube tu archivo Excel lleno", type=["xlsx", "xls"])
                 
-                if excel_file is not None:
-                    if st.button("🚀 Iniciar Procesamiento Masivo", type="primary"):
-                        with st.spinner("Procesando productos en bloque... (Esto tomará solo un segundo)"):
-                            try:
-                                # IMPORTANTE: Solo leemos la hoja 'Plantilla' para evitar que Pandas intente procesar la hoja oculta 'Listas'
-                                df = pd.read_excel(excel_file, sheet_name='Plantilla', skiprows=[1]).fillna("")
+                # FORMULARIO ESCUDO: Evita que la página se recargue al soltar el archivo
+                with st.form("form_carga_masiva"):
+                    excel_file = st.file_uploader("Sube tu archivo Excel lleno", type=["xlsx", "xls"])
+                    btn_procesar = st.form_submit_button("🚀 Iniciar Procesamiento Masivo", type="primary")
+                
+                if btn_procesar and excel_file is not None:
+                    with st.spinner("Procesando productos en bloque... (Esto tomará solo un segundo)"):
+                        try:
+                            df = pd.read_excel(excel_file, sheet_name='Plantilla', skiprows=[1]).fillna("")
+                            
+                            nombres_cat_db = [c['nombre'] for c in mis_categorias]
+                            nombres_col_db = [c['nombre'] for c in mis_colores]
+                            nombres_cur_db = [c['nombre'] for c in mis_curvas]
+                            
+                            nuevas_cats, nuevas_cols, nuevas_curvas = [], [], []
+                            cats_vistas, cols_vistas, curvas_vistas = set(), set(), set()
+                            
+                            productos_a_insertar = []
+                            
+                            for index, row in df.iterrows():
+                                cat_xls = str(row.get("Categoría", "")).strip()
+                                art_xls = str(row.get("Artículo", "")).strip()
+                                col_xls = str(row.get("Color", "")).strip()
                                 
-                                nombres_cat_db = [c['nombre'] for c in mis_categorias]
-                                nombres_col_db = [c['nombre'] for c in mis_colores]
-                                nombres_cur_db = [c['nombre'] for c in mis_curvas]
+                                if not art_xls or not cat_xls: continue 
                                 
-                                nuevas_cats, nuevas_cols, nuevas_curvas = [], [], []
-                                cats_vistas, cols_vistas, curvas_vistas = set(), set(), set()
-                                
-                                productos_a_insertar = []
-                                
-                                for index, row in df.iterrows():
-                                    cat_xls = str(row.get("Categoría", "")).strip()
-                                    art_xls = str(row.get("Artículo", "")).strip()
-                                    col_xls = str(row.get("Color", "")).strip()
+                                if cat_xls not in nombres_cat_db and cat_xls not in cats_vistas:
+                                    nuevas_cats.append({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_xls})
+                                    cats_vistas.add(cat_xls)
                                     
-                                    if not art_xls or not cat_xls: continue 
+                                if col_xls and col_xls not in nombres_col_db and col_xls not in cols_vistas:
+                                    nuevas_cols.append({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_xls})
+                                    cols_vistas.add(col_xls)
                                     
-                                    if cat_xls not in nombres_cat_db and cat_xls not in cats_vistas:
-                                        nuevas_cats.append({"proveedor": st.session_state.usuario_actual, "tipo": "categoria", "nombre": cat_xls})
-                                        cats_vistas.add(cat_xls)
-                                        
-                                    if col_xls and col_xls not in nombres_col_db and col_xls not in cols_vistas:
-                                        nuevas_cols.append({"proveedor": st.session_state.usuario_actual, "tipo": "color", "nombre": col_xls})
-                                        cols_vistas.add(col_xls)
-                                        
-                                    t_curva = str(row.get("Tipo Curva", "Sin Curva (N/A)")).strip()
-                                    t_desde = str(row.get("Talle Desde", "N/A")).strip()
-                                    t_hasta = str(row.get("Talle Hasta (Mayor al Desde)", "N/A")).strip()
-                                    cantidades = str(row.get("Cantidades (Ej: 2-2-3-2-2-1)", "N/A")).strip()
-                                    
-                                    nombre_curva_xls = f"Excel: {cat_xls} {col_xls}"
-                                    if "Sin Curva" not in t_curva and cantidades != "N/A" and nombre_curva_xls not in nombres_cur_db and nombre_curva_xls not in curvas_vistas:
-                                        val_curva_xls = f"{t_curva}|{t_desde}|{t_hasta}|{cantidades}"
-                                        nuevas_curvas.append({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_curva_xls, "valor": val_curva_xls})
-                                        curvas_vistas.add(nombre_curva_xls)
+                                t_curva = str(row.get("Tipo Curva", "Sin Curva (N/A)")).strip()
+                                t_desde = str(row.get("Talle Desde", "N/A")).strip()
+                                t_hasta = str(row.get("Talle Hasta (Mayor al Desde)", "N/A")).strip()
+                                cantidades = str(row.get("Cantidades (Ej: 2-2-3-2-2-1)", "N/A")).strip()
+                                
+                                nombre_curva_xls = f"Excel: {cat_xls} {col_xls}"
+                                if "Sin Curva" not in t_curva and cantidades != "N/A" and nombre_curva_xls not in nombres_cur_db and nombre_curva_xls not in curvas_vistas:
+                                    val_curva_xls = f"{t_curva}|{t_desde}|{t_hasta}|{cantidades}"
+                                    nuevas_curvas.append({"proveedor": st.session_state.usuario_actual, "tipo": "curva", "nombre": nombre_curva_xls, "valor": val_curva_xls})
+                                    curvas_vistas.add(nombre_curva_xls)
 
-                                    precio_xls = row.get("Precio", 0)
-                                    precio_xls = float(precio_xls) if str(precio_xls).replace('.','',1).isdigit() else 0.0
-                                    
-                                    f_url = str(row.get("URL Foto (Opcional)", "")).strip()
-                                    v_url = str(row.get("URL Video (Opcional)", "")).strip()
-                                    
-                                    productos_a_insertar.append({
-                                        "proveedor": st.session_state.usuario_actual, "categoria": cat_xls, "articulo": art_xls, "color": col_xls, 
-                                        "descripcion": str(row.get("Descripción", "")).strip(), "precio": precio_xls,
-                                        "talle_desde": t_desde, "talle_hasta": t_hasta, "curva": cantidades, "foto_url": f_url if f_url else None, "video_url": v_url if v_url else None
-                                    })
+                                precio_xls = row.get("Precio", 0)
+                                precio_xls = float(precio_xls) if str(precio_xls).replace('.','',1).isdigit() else 0.0
                                 
-                                if nuevas_cats: supabase.table("configuraciones_fabrica").insert(nuevas_cats).execute()
-                                if nuevas_cols: supabase.table("configuraciones_fabrica").insert(nuevas_cols).execute()
-                                if nuevas_curvas: supabase.table("configuraciones_fabrica").insert(nuevas_curvas).execute()
+                                f_url = str(row.get("URL Foto (Opcional)", "")).strip()
+                                v_url = str(row.get("URL Video (Opcional)", "")).strip()
                                 
-                                if productos_a_insertar:
-                                    supabase.table("productos").insert(productos_a_insertar).execute()
-                                
-                                st.success(f"✅ ¡Se procesaron {len(productos_a_insertar)} productos en tiempo récord! Redirigiendo al catálogo...")
-                                time.sleep(2)
-                                st.session_state.panel_privado = "catalogo"
-                                st.query_params["panel"] = "catalogo"
-                                st.rerun()
-                                
-                            except Exception as e:
-                                st.error(f"Error procesando el archivo: {e}")
+                                productos_a_insertar.append({
+                                    "proveedor": st.session_state.usuario_actual, "categoria": cat_xls, "articulo": art_xls, "color": col_xls, 
+                                    "descripcion": str(row.get("Descripción", "")).strip(), "precio": precio_xls,
+                                    "talle_desde": t_desde, "talle_hasta": t_hasta, "curva": cantidades, "foto_url": f_url if f_url else None, "video_url": v_url if v_url else None
+                                })
+                            
+                            if nuevas_cats: supabase.table("configuraciones_fabrica").insert(nuevas_cats).execute()
+                            if nuevas_cols: supabase.table("configuraciones_fabrica").insert(nuevas_cols).execute()
+                            if nuevas_curvas: supabase.table("configuraciones_fabrica").insert(nuevas_curvas).execute()
+                            
+                            if productos_a_insertar:
+                                supabase.table("productos").insert(productos_a_insertar).execute()
+                            
+                            st.success(f"✅ ¡Se procesaron {len(productos_a_insertar)} productos en tiempo récord! Redirigiendo al catálogo...")
+                            time.sleep(2)
+                            st.session_state.panel_privado = "catalogo"
+                            st.query_params["panel"] = "catalogo"
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Error procesando el archivo: {e}")
+                elif btn_procesar and excel_file is None:
+                    st.warning("⚠️ Primero arrastra un archivo a la zona de carga.")
 
         # PESTAÑA 2: CATÁLOGO AGRUPADO
         elif st.session_state.panel_privado == "catalogo":
