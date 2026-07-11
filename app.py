@@ -41,8 +41,7 @@ fk = st.session_state.form_key
 # ========================================================
 # AUTO-RECUPERACIÓN DE SESIÓN (ANTI-F5)
 # ========================================================
-# Si el usuario es None, pero hay un ID en la URL, significa que apretó F5.
-# Lo buscamos y lo volvemos a loguear automáticamente.
+# Si apretamos F5, la memoria se borra, pero capturamos el ID de la URL y te logueamos de vuelta en silencio.
 if st.session_state.usuario_actual is None and "uid" in st.query_params:
     try:
         res = supabase.table("usuarios").select("*").eq("id", st.query_params["uid"]).execute()
@@ -64,18 +63,17 @@ def enviar_correo_recuperacion(destinatario, nueva_clave):
         return False, "Error en el script de Google"
     except Exception as e: return False, str(e)
 
-# --- NUEVOS RANGOS DE TALLES ---
 def generar_lista_talles(tipo, d, h):
     if "Sin Curva" in tipo: return []
     elif "Numérica Simple" in tipo:
         return [str(i) for i in range(int(d), int(h)+1)] if int(h) >= int(d) else []
     elif "Doble Par" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(12, 54, 2)] # 12/13 a 52/53
+        lista = [f"{i}/{i+1}" for i in range(12, 54, 2)]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
     elif "Doble Impar" in tipo:
-        lista = [f"{i}/{i+1}" for i in range(13, 55, 2)] # 13/14 a 53/54
+        lista = [f"{i}/{i+1}" for i in range(13, 55, 2)]
         if d in lista and h in lista and lista.index(h) >= lista.index(d):
             return lista[lista.index(d) : lista.index(h)+1]
         return []
@@ -90,7 +88,7 @@ def generar_lista_talles(tipo, d, h):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    # URL Limpia solo en la vista pública
+    # URL Limpia en la portada
     st.query_params.clear()
 
     col_logo, col_nav = st.columns([2, 3])
@@ -127,7 +125,7 @@ if st.session_state.usuario_actual is None:
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
                         st.session_state.panel_privado = "carga"
                         
-                        # Inyectamos el ancla anti-F5 en la URL
+                        # Guardar el ID en la URL para protección Anti-F5
                         st.query_params["uid"] = str(res.data[0]["id"])
                         st.query_params["panel"] = "carga"
                         st.rerun()
@@ -405,12 +403,12 @@ else:
                                 st.error(f"Error al guardar: {e}")
 
             # ----------------------------------------
-            # CARGA MASIVA (EXCEL) - OPTIMIZADA CON BULK INSERT
+            # CARGA MASIVA (EXCEL) - EXCEL INTELIGENTE CON MENÚS DEPENDIENTES
             # ----------------------------------------
             elif tipo_carga == "Carga Masiva (Excel)":
-                st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El procesamiento ahora es ultrarrápido y masivo. Las categorías, colores y curvas nuevas se aprenderán automáticamente.")
+                st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El Excel viene equipado con desplegables inteligentes que cambian automáticamente según el Tipo de Curva.")
                 
-                # Generar Plantilla Excel con Validaciones actualizadas
+                # Generar Plantilla Excel en memoria
                 df_template = pd.DataFrame({
                     "Categoría": ["Ej: Deportiva Goma"],
                     "Artículo": ["Zapa Urban"],
@@ -438,10 +436,40 @@ else:
                             except: pass
                         worksheet.column_dimensions[col_letter].width = max_length + 2
 
-                    # Actualización de Validaciones en Excel para coincidir con los nuevos textos
+                    # 1. Validación Principal para Tipo de Curva (Columna F)
                     dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par (Ej: 12/13),Doble Impar (Ej: 13/14),Alfabética (XXXS, S...),Sin Curva (N/A)"', allow_blank=True)
                     worksheet.add_data_validation(dv_tipo)
                     dv_tipo.add('F3:F1048576') 
+
+                    # 2. Hoja oculta con los datos en crudo para las validaciones dependientes
+                    ws_listas = writer.book.create_sheet('Listas')
+                    ws_listas.sheet_state = 'hidden'
+
+                    num_simple = [str(i) for i in range(1, 121)]
+                    doble_par = [f"{i}/{i+1}" for i in range(12, 54, 2)]
+                    doble_impar = [f"{i}/{i+1}" for i in range(13, 55, 2)]
+                    alfabetica = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+                    sin_curva = ["N/A"]
+
+                    ws_listas.append(["Num", "Par", "Impar", "Alfa", "Na"])
+                    max_len = max(len(num_simple), len(doble_par), len(doble_impar), len(alfabetica), len(sin_curva))
+
+                    for i in range(max_len):
+                        row = [
+                            num_simple[i] if i < len(num_simple) else "",
+                            doble_par[i] if i < len(doble_par) else "",
+                            doble_impar[i] if i < len(doble_impar) else "",
+                            alfabetica[i] if i < len(alfabetica) else "",
+                            sin_curva[i] if i < len(sin_curva) else ""
+                        ]
+                        ws_listas.append(row)
+
+                    # 3. Validación Dependiente Avanzada (Columnas G y H)
+                    # Lee las primeras letras de F3 y cambia la lista que muestra.
+                    formula_talles = '=IF(LEFT(F3,4)="Numé",Listas!$A$2:$A$121,IF(LEFT(F3,7)="Doble P",Listas!$B$2:$B$22,IF(LEFT(F3,7)="Doble I",Listas!$C$2:$C$22,IF(LEFT(F3,4)="Alfa",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
+                    dv_talles = DataValidation(type="list", formula1=formula_talles, allow_blank=True)
+                    worksheet.add_data_validation(dv_talles)
+                    dv_talles.add('G3:H1048576')
                 
                 st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
