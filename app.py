@@ -42,7 +42,6 @@ fk = st.session_state.form_key
 # ========================================================
 # AUTO-RECUPERACIÓN DE SESIÓN (ANTI-F5)
 # ========================================================
-# Si el usuario no está en memoria pero hay un UID en la URL, lo reconectamos silenciosamente
 if st.session_state.usuario_actual is None and "uid" in st.query_params:
     try:
         res = supabase.table("usuarios").select("*").eq("id", st.query_params["uid"]).execute()
@@ -88,7 +87,7 @@ def generar_lista_talles(tipo, d, h):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
-    st.query_params.clear() # Limpia la URL solo si estás fuera de sesión
+    st.query_params.clear() 
     
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B Calzado</span></h2>", unsafe_allow_html=True)
@@ -457,10 +456,10 @@ else:
                             except: pass
                         worksheet.column_dimensions[col_letter].width = max_length + 2
 
-                    # 1. Validación Principal para Tipo de Curva (Columna F)
+                    # 1. Validación Principal (Columna F limitada a 2000 filas para ahorrar memoria RAM)
                     dv_tipo = DataValidation(type="list", formula1='"Numérica Simple,Doble Par,Doble Impar,Alfabética,Sin Curva (N/A)"', allow_blank=True)
                     worksheet.add_data_validation(dv_tipo)
-                    dv_tipo.add('F3:F1048576') 
+                    dv_tipo.add('F3:F2000') 
 
                     # 2. Hoja oculta con los datos en crudo para las validaciones dependientes
                     ws_listas = writer.book.create_sheet('Listas')
@@ -485,11 +484,11 @@ else:
                         ]
                         ws_listas.append(row)
 
-                    # 3. Validación Dependiente Avanzada REPARADA (El truco del $F3 bloquea la evaluación relativa horizontal)
+                    # 3. Validación Dependiente Avanzada (Limitada a 2000 filas)
                     formula_talles = '=IF($F3="Numérica Simple",Listas!$A$2:$A$121,IF($F3="Doble Par",Listas!$B$2:$B$22,IF($F3="Doble Impar",Listas!$C$2:$C$22,IF($F3="Alfabética",Listas!$D$2:$D$10,Listas!$E$2:$E$2))))'
                     dv_talles = DataValidation(type="list", formula1=formula_talles, allow_blank=True)
                     worksheet.add_data_validation(dv_talles)
-                    dv_talles.add('G3:H1048576')
+                    dv_talles.add('G3:H2000')
                 
                 st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=buffer.getvalue(), file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
@@ -500,7 +499,8 @@ else:
                     if st.button("🚀 Iniciar Procesamiento Masivo", type="primary"):
                         with st.spinner("Procesando productos en bloque... (Esto tomará solo un segundo)"):
                             try:
-                                df = pd.read_excel(excel_file, skiprows=[1]).fillna("")
+                                # IMPORTANTE: Solo leemos la hoja 'Plantilla' para evitar que Pandas intente procesar la hoja oculta 'Listas'
+                                df = pd.read_excel(excel_file, sheet_name='Plantilla', skiprows=[1]).fillna("")
                                 
                                 nombres_cat_db = [c['nombre'] for c in mis_categorias]
                                 nombres_col_db = [c['nombre'] for c in mis_colores]
