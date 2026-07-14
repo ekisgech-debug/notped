@@ -722,13 +722,16 @@ else:
                         st.markdown(f"<h2 style='color: #FFB300; margin-bottom: 0px;'>📁 {cat_name} <span style='color: gray; font-size: 16px;'>🔗</span></h2>", unsafe_allow_html=True)
                     with c_pdf:
                         prods_cat = [p for p in productos if p.get('categoria', 'General') == cat_name]
-			prods_cat = sorted(prods_cat, key=lambda x: str(x.get('articulo', '')).lower())
+                        # ORDENAMIENTO ALFABÉTICO (A-Z)
+                        prods_cat = sorted(prods_cat, key=lambda x: str(x.get('articulo', '')).lower())
+                        
                         pdf_data = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name)
                         if pdf_data:
                             st.download_button("📥 PDF Categoría", data=pdf_data, file_name=f"Catalogo_{cat_name}.pdf", mime="application/pdf", use_container_width=True)
                     
                     st.write("") 
                     
+                   
                     for p in prods_cat:
                         with st.container(border=True):
                             c_img, c_lupa, c_vid, c_info, c_talles, c_precio, c_edit, c_del = st.columns(
