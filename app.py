@@ -122,7 +122,7 @@ def dialog_ampliar_imagen(url, articulo):
     st.image(url, use_container_width=True)
 
 # ========================================================
-# GENERADOR DE PDF
+# GENERADOR DE PDF ULTRA COMPACTO
 # ========================================================
 @st.cache_data(show_spinner=False)
 def generar_pdf_catalogo(productos, marca, titulo_cat):
@@ -135,57 +135,74 @@ def generar_pdf_catalogo(productos, marca, titulo_cat):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     
-    pdf.set_font("helvetica", style="B", size=18)
-    pdf.cell(0, 12, f"CATÁLOGO MAYORISTA - {marca}", ln=True, align="C")
+    # Título Principal
+    pdf.set_font("helvetica", style="B", size=16)
+    pdf.cell(0, 10, f"CATÁLOGO MAYORISTA - {marca}", ln=True, align="C")
+    
+    # Subtítulo (Categoría)
     pdf.set_font("helvetica", style="I", size=12)
-    pdf.cell(0, 8, f"Categoría: {titulo_cat}", ln=True, align="C")
-    pdf.ln(5)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"Categoría: {titulo_cat}", ln=True, align="C")
+    pdf.ln(6)
     
     for p in productos:
         x_start = pdf.get_x()
         y_start = pdf.get_y()
         
-        if y_start > 250:
+        # Si no entra el producto en la hoja, salto de página
+        if y_start > 265:
             pdf.add_page()
             y_start = pdf.get_y()
             
+        # Caja contenedora del producto (Sólo 22mm de alto)
         pdf.set_draw_color(220, 220, 220)
-        pdf.rect(10, y_start, 190, 35)
+        pdf.rect(10, y_start, 190, 22)
         
+        # 1. IMAGEN (Con keep_aspect_ratio para no deformar)
         if p.get('foto_url'):
             try:
                 resp = requests.get(p['foto_url'], timeout=3)
                 if resp.status_code == 200:
                     img_stream = io.BytesIO(resp.content)
-                    pdf.image(img_stream, x=12, y=y_start+2, w=30, h=30)
+                    pdf.image(img_stream, x=12, y=y_start+2, w=22, h=18, keep_aspect_ratio=True)
             except:
                 pass
                 
-        pdf.set_xy(45, y_start + 4)
-        pdf.set_font("helvetica", style="B", size=12)
-        pdf.cell(110, 6, f"{p['articulo']} - {p.get('color','')}", ln=False)
+        # 2. ARTÍCULO Y DESCRIPCIÓN (Alineado a la izquierda)
+        pdf.set_text_color(40, 40, 40)
+        pdf.set_xy(38, y_start + 5)
+        pdf.set_font("helvetica", style="B", size=11)
+        pdf.cell(70, 6, f"{p['articulo']}  |  {p.get('color','')}", ln=False)
         
-        pdf.set_font("helvetica", style="B", size=14)
-        pdf.set_text_color(0, 150, 80)
-        pdf.cell(0, 6, f"${p['precio']:,.0f}", ln=True, align="R")
-        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(38, y_start + 11)
+        pdf.set_font("helvetica", size=8)
+        pdf.set_text_color(120, 120, 120)
+        desc = str(p.get('descripcion',''))[:45] + "..." if len(str(p.get('descripcion',''))) > 45 else str(p.get('descripcion',''))
+        pdf.cell(70, 5, desc, ln=False)
         
-        pdf.set_xy(45, y_start + 12)
-        pdf.set_font("helvetica", size=10)
-        pdf.cell(0, 5, f"Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=True)
-        
-        pdf.set_xy(45, y_start + 18)
-        pdf.set_font("helvetica", style="B", size=9)
-        pdf.set_text_color(23, 162, 184)
-        pdf.cell(0, 5, f"Curva: {p.get('curva','')}", ln=True)
-        pdf.set_text_color(0, 0, 0)
-        
-        pdf.set_xy(45, y_start + 24)
+        # 3. TALLES Y CURVA (Centro)
+        pdf.set_xy(110, y_start + 5)
         pdf.set_font("helvetica", size=9)
-        desc = str(p.get('descripcion',''))[:80] + "..." if len(str(p.get('descripcion',''))) > 80 else str(p.get('descripcion',''))
-        pdf.cell(0, 5, desc, ln=True)
+        pdf.set_text_color(100, 100, 100)
+        if p.get("curva") == "N/A":
+            pdf.cell(40, 6, "Talles: Sin Curva", ln=False)
+        else:
+            pdf.cell(40, 6, f"Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=False)
+            
+            pdf.set_xy(110, y_start + 11)
+            pdf.set_font("courier", style="B", size=9)
+            pdf.set_text_color(23, 162, 184) # Cyan/Teal para la curva
+            pdf.cell(40, 5, f"Curva: {p.get('curva','')}", ln=False)
         
-        pdf.set_y(y_start + 40)
+        # 4. PRECIO (Alineado a la derecha)
+        pdf.set_xy(150, y_start + 7)
+        pdf.set_font("helvetica", style="B", size=14)
+        pdf.set_text_color(40, 167, 69) # Verde para el precio
+        pdf.cell(45, 8, f"${p['precio']:,.0f}", ln=False, align="R")
+        
+        # Restaurar configuración y mover la pluma hacia abajo para el próximo producto
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_y(y_start + 24)
         
     return bytes(pdf.output())
 
@@ -700,7 +717,6 @@ else:
                 
                 for cat_name in categorias_presentes:
                     
-                    # CABECERA DE CATEGORÍA Y BOTÓN PDF ALINEADOS
                     c_titulo, c_vacio, c_pdf = st.columns([5, 4, 2], vertical_alignment="bottom")
                     with c_titulo:
                         st.markdown(f"<h2 style='color: #FFB300; margin-bottom: 0px;'>📁 {cat_name} <span style='color: gray; font-size: 16px;'>🔗</span></h2>", unsafe_allow_html=True)
@@ -710,12 +726,10 @@ else:
                         if pdf_data:
                             st.download_button("📥 PDF Categoría", data=pdf_data, file_name=f"Catalogo_{cat_name}.pdf", mime="application/pdf", use_container_width=True)
                     
-                    st.write("") # Pequeño margen debajo del título
+                    st.write("") 
                     
-                    # FILAS DE PRODUCTOS ULTRA-COMPACTAS
                     for p in prods_cat:
                         with st.container(border=True):
-                            # Distribución milimétrica de columnas centradas verticalmente
                             c_img, c_lupa, c_vid, c_info, c_talles, c_precio, c_edit, c_del = st.columns(
                                 [0.8, 0.5, 0.5, 3.5, 2.5, 1.5, 0.5, 0.5], 
                                 vertical_alignment="center"
@@ -725,7 +739,6 @@ else:
                                 if p.get("foto_url"):
                                     st.image(p["foto_url"])
                                 else:
-                                    # Si no hay foto, un mini botón soluciona el problema de diseño
                                     if st.button("📷", key=f"f_{p['id']}", help="Subir Foto", use_container_width=True):
                                         dialog_subir_foto(p['id'], p['articulo'])
                             
@@ -759,7 +772,7 @@ else:
                                     supabase.table("productos").delete().eq("id", p['id']).execute()
                                     st.rerun()
                     
-                    st.write("<br>", unsafe_allow_html=True) # Espacio entre categorías
+                    st.write("<br>", unsafe_allow_html=True)
             else:
                 st.info("Aún no tienes productos en tu catálogo.")
 
