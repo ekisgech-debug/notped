@@ -18,31 +18,21 @@ st.markdown("""
         [data-testid="stFileUploader"] small {display: none !important;}
         [data-testid="stFileUploaderDropzoneInstructions"] > div > span {display: none !important;}
         
-        /* Ajustar espaciado vertical general */
-        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+        /* Ajustar ancho de página y márgenes */
+        .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 95%; }
         
-        /* MAGIA ULTRA-COMPACTA PARA EL CATÁLOGO */
-        .prod-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 15px;
-            background-color: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        /* Aplastar el padding de los contenedores de productos para hacerlos ultracompactos */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 8px 12px !important;
+            border-radius: 8px !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
         }
         
-        /* Ajuste de columnas en el flexbox */
-        div[data-testid="column"] { padding: 0 !important; }
+        /* Eliminar espacio debajo de los textos markdown */
+        .stMarkdown p { margin-bottom: 0px !important; }
         
-        /* Hacer que los botones de st.button sean más compactos en la vista de lista */
-        .boton-icono-mini button {
-            padding: 2px 8px !important;
-            height: auto !important;
-            min-height: 32px !important;
-        }
+        /* Asegurar que las columnas tengan poco margen entre sí */
+        [data-testid="column"] { padding: 0 6px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -80,7 +70,7 @@ if st.session_state.usuario_actual is None and "uid" in st.query_params:
         pass
 
 # ========================================================
-# VENTANAS FLOTANTES (POP-UPS DE EDICIÓN Y AMPLIACIÓN)
+# VENTANAS FLOTANTES (POP-UPS)
 # ========================================================
 @st.dialog("Renombrar Categoría")
 def dialog_editar_categoria(c_id, viejo_nombre):
@@ -111,16 +101,31 @@ def dialog_editar_producto(p):
         time.sleep(1)
         st.rerun()
 
+@st.dialog("Subir Foto del Producto")
+def dialog_subir_foto(p_id, articulo):
+    st.write(f"Selecciona la imagen para: **{articulo}**")
+    img_up = st.file_uploader("JPG / PNG", type=["jpg", "png", "jpeg"], key=f"up_{p_id}")
+    if img_up:
+        with st.spinner("Subiendo imagen a la nube..."):
+            extension = img_up.name.split('.')[-1]
+            nombre_archivo = f"{uuid.uuid4()}.{extension}"
+            supabase.storage.from_("fotos_productos").upload(nombre_archivo, img_up.getvalue(), {"content-type": img_up.type})
+            f_url = supabase.storage.from_("fotos_productos").get_public_url(nombre_archivo)
+            supabase.table("productos").update({"foto_url": f_url}).eq("id", p_id).execute()
+            st.success("¡Foto añadida con éxito!")
+            time.sleep(1)
+            st.rerun()
+
 @st.dialog("Vista Ampliada")
 def dialog_ampliar_imagen(url, articulo):
     st.markdown(f"### {articulo}")
     st.image(url, use_container_width=True)
 
 # ========================================================
-# GENERADOR DE PDF (CORREGIDO A BYTES PURO)
+# GENERADOR DE PDF
 # ========================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_catalogo(productos, marca):
+def generar_pdf_catalogo(productos, marca, titulo_cat):
     try:
         from fpdf import FPDF
     except ImportError:
@@ -132,6 +137,8 @@ def generar_pdf_catalogo(productos, marca):
     
     pdf.set_font("helvetica", style="B", size=18)
     pdf.cell(0, 12, f"CATÁLOGO MAYORISTA - {marca}", ln=True, align="C")
+    pdf.set_font("helvetica", style="I", size=12)
+    pdf.cell(0, 8, f"Categoría: {titulo_cat}", ln=True, align="C")
     pdf.ln(5)
     
     for p in productos:
@@ -159,17 +166,19 @@ def generar_pdf_catalogo(productos, marca):
         pdf.cell(110, 6, f"{p['articulo']} - {p.get('color','')}", ln=False)
         
         pdf.set_font("helvetica", style="B", size=14)
-        pdf.set_text_color(0, 128, 0)
+        pdf.set_text_color(0, 150, 80)
         pdf.cell(0, 6, f"${p['precio']:,.0f}", ln=True, align="R")
         pdf.set_text_color(0, 0, 0)
         
         pdf.set_xy(45, y_start + 12)
         pdf.set_font("helvetica", size=10)
-        pdf.cell(0, 5, f"Cat: {p.get('categoria','')} | Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=True)
+        pdf.cell(0, 5, f"Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=True)
         
         pdf.set_xy(45, y_start + 18)
-        pdf.set_font("helvetica", style="I", size=9)
+        pdf.set_font("helvetica", style="B", size=9)
+        pdf.set_text_color(23, 162, 184)
         pdf.cell(0, 5, f"Curva: {p.get('curva','')}", ln=True)
+        pdf.set_text_color(0, 0, 0)
         
         pdf.set_xy(45, y_start + 24)
         pdf.set_font("helvetica", size=9)
@@ -598,7 +607,6 @@ else:
                 st.info("💡 **Instrucciones:** Descarga la plantilla, llénala desde la fila 3 y súbela. El Excel viene equipado con desplegables inteligentes que cambian automáticamente según el Tipo de Curva.")
                 
                 excel_bytes = obtener_plantilla_excel()
-                
                 st.download_button(label="📥 Descargar Plantilla Excel Inteligente", data=excel_bytes, file_name="Plantilla_Carga_NotPed.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 st.write("---")
@@ -677,9 +685,11 @@ else:
                 elif btn_procesar and excel_file is None:
                     st.warning("⚠️ Primero arrastra un archivo a la zona de carga.")
 
-        # PESTAÑA 2: CATÁLOGO ULTRA-COMPACTO DE 1 RENGLÓN
+        # ========================================================
+        # PESTAÑA 2: CATÁLOGO AGRUPADO ULTRA-COMPACTO DE 1 RENGLÓN
+        # ========================================================
         elif st.session_state.panel_privado == "catalogo":
-            st.title(f"🏭 Panel Fábrica | {st.session_state.marca_actual}")
+            st.title(f"🏭 Catálogo | {st.session_state.marca_actual}")
             st.write("---")
             
             res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).order("id", desc=True).execute()
@@ -689,63 +699,66 @@ else:
                 categorias_presentes = sorted(list(set([p.get('categoria', 'General') for p in productos])))
                 
                 for cat_name in categorias_presentes:
-                    # Fila de Título de Categoría y Botón PDF
-                    c_tit, c_btn_pdf = st.columns([5, 1])
-                    with c_tit:
-                        st.markdown(f"<h2 style='color: #F5A623; margin-bottom: 0;'>📁 {cat_name}</h2>", unsafe_allow_html=True)
-                    with c_btn_pdf:
+                    
+                    # CABECERA DE CATEGORÍA Y BOTÓN PDF ALINEADOS
+                    c_titulo, c_vacio, c_pdf = st.columns([5, 4, 2], vertical_alignment="bottom")
+                    with c_titulo:
+                        st.markdown(f"<h2 style='color: #FFB300; margin-bottom: 0px;'>📁 {cat_name} <span style='color: gray; font-size: 16px;'>🔗</span></h2>", unsafe_allow_html=True)
+                    with c_pdf:
                         prods_cat = [p for p in productos if p.get('categoria', 'General') == cat_name]
-                        pdf_data = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual)
+                        pdf_data = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name)
                         if pdf_data:
                             st.download_button("📥 PDF Categoría", data=pdf_data, file_name=f"Catalogo_{cat_name}.pdf", mime="application/pdf", use_container_width=True)
                     
-                    st.write("") # Espaciador ligero
+                    st.write("") # Pequeño margen debajo del título
                     
+                    # FILAS DE PRODUCTOS ULTRA-COMPACTAS
                     for p in prods_cat:
-                        # CONTENEDOR FLEX ULTRA COMPACTO
-                        st.markdown('<div class="prod-container">', unsafe_allow_html=True)
-                        
-                        # Definimos 6 micro-columnas para forzar que todo esté en 1 renglón
-                        col_img, col_btn_img, col_txt, col_curva, col_precio, col_acciones = st.columns([1, 0.5, 3, 3, 1.5, 1])
-                        
-                        with col_img:
-                            if p.get("foto_url"):
-                                st.image(p["foto_url"], width=60)
-                            else:
-                                st.markdown("<span style='font-size:10px; color:red;'>Sin Foto</span>", unsafe_allow_html=True)
+                        with st.container(border=True):
+                            # Distribución milimétrica de columnas centradas verticalmente
+                            c_img, c_lupa, c_vid, c_info, c_talles, c_precio, c_edit, c_del = st.columns(
+                                [0.8, 0.5, 0.5, 3.5, 2.5, 1.5, 0.5, 0.5], 
+                                vertical_alignment="center"
+                            )
+                            
+                            with c_img:
+                                if p.get("foto_url"):
+                                    st.image(p["foto_url"])
+                                else:
+                                    # Si no hay foto, un mini botón soluciona el problema de diseño
+                                    if st.button("📷", key=f"f_{p['id']}", help="Subir Foto", use_container_width=True):
+                                        dialog_subir_foto(p['id'], p['articulo'])
+                            
+                            with c_lupa:
+                                if p.get("foto_url"):
+                                    if st.button("🔍", key=f"z_{p['id']}", use_container_width=True):
+                                        dialog_ampliar_imagen(p["foto_url"], p['articulo'])
+                            
+                            with c_vid:
+                                if p.get("video_url"):
+                                    st.link_button("▶️", p["video_url"], use_container_width=True)
+                                    
+                            with c_info:
+                                st.markdown(f"<div style='line-height:1.3;'><strong style='font-size:15px; color:#2C3E50;'>{p['articulo']}</strong> <span style='color:#7F8C8D; font-size:14px;'>| {p.get('color','')}</span><br><span style='color:#95A5A6; font-size:12px;'>{p.get('descripcion','')}</span></div>", unsafe_allow_html=True)
                                 
-                        with col_btn_img:
-                            st.markdown('<div class="boton-icono-mini">', unsafe_allow_html=True)
-                            if p.get("foto_url"):
-                                if st.button("🔍", key=f"amp_{p['id']}", help="Ampliar Imagen"): dialog_ampliar_imagen(p["foto_url"], p['articulo'])
-                            if p.get("video_url"):
-                                st.link_button("▶️", p["video_url"], help="Ver Video")
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                        with col_txt:
-                            st.markdown(f"<span style='font-weight:bold; font-size:15px;'>{p['articulo']}</span> | <span style='color:gray; font-size:14px;'>{p.get('color', '')}</span>", unsafe_allow_html=True)
-                            st.markdown(f"<div style='color:gray; font-size:12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'>{p.get('descripcion', '')}</div>", unsafe_allow_html=True)
-                            
-                        with col_curva:
-                            if p.get("curva") == "N/A":
-                                st.markdown("<span style='color:gray; font-size:13px;'>Talles: Sin Curva</span>", unsafe_allow_html=True)
-                            else:
-                                st.markdown(f"<span style='color:gray; font-size:13px;'>Talles: {p['talle_desde']} al {p['talle_hasta']}</span>", unsafe_allow_html=True)
-                                st.markdown(f"<span style='color:#17A2B8; font-family:monospace; font-size:13px;'>Curva: {p['curva']}</span>", unsafe_allow_html=True)
+                            with c_talles:
+                                if p.get("curva") == "N/A":
+                                    st.markdown("<span style='color:#7F8C8D; font-size:13px;'>Talles: Sin Curva</span>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<div style='line-height:1.3;'><span style='color:#7F8C8D; font-size:12px;'>Talles: {p.get('talle_desde')} al {p.get('talle_hasta')}</span><br><span style='color:#17A2B8; font-size:13px; font-family:monospace;'>Curva: {p.get('curva')}</span></div>", unsafe_allow_html=True)
+                                    
+                            with c_precio:
+                                st.markdown(f"<div style='color:#00a650; font-size:22px; font-weight:bold;'>${p['precio']:,.0f}</div>", unsafe_allow_html=True)
                                 
-                        with col_precio:
-                            st.markdown(f"<h3 style='color: #28a745; margin: 0; padding: 0;'>${p['precio']:,.0f}</h3>", unsafe_allow_html=True)
-                            
-                        with col_acciones:
-                            st.markdown('<div class="boton-icono-mini" style="display:flex; gap:5px; justify-content:flex-end;">', unsafe_allow_html=True)
-                            if st.button("✏️", key=f"ed_prod_{p['id']}", help="Editar Artículo"):
-                                dialog_editar_producto(p)
-                            if st.button("🗑️", key=f"del_prod_{p['id']}", help="Eliminar Artículo"):
-                                supabase.table("productos").delete().eq("id", p['id']).execute()
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                        st.markdown('</div>', unsafe_allow_html=True)
+                            with c_edit:
+                                if st.button("✏️", key=f"e_{p['id']}", use_container_width=True):
+                                    dialog_editar_producto(p)
+                                    
+                            with c_del:
+                                if st.button("🗑️", key=f"d_{p['id']}", use_container_width=True):
+                                    supabase.table("productos").delete().eq("id", p['id']).execute()
+                                    st.rerun()
+                    
                     st.write("<br>", unsafe_allow_html=True) # Espacio entre categorías
             else:
                 st.info("Aún no tienes productos en tu catálogo.")
