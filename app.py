@@ -149,6 +149,55 @@ def dialog_duplicar_categoria(cat_name):
         else:
             st.warning("Ingresa un nombre diferente al original.")
 
+def mostrar_detalle_pedido(detalle_json, codigo_pedido):
+    if not detalle_json:
+        return
+    
+    filas = []
+    # Recorremos el JSON para armar filas de datos
+    for p_id, data in detalle_json.items():
+        fila = {
+            "Artículo": data.get("articulo", ""),
+            "Precio Unit. ($)": data.get("precio_unitario", 0),
+            "Pares Totales": data.get("pares_totales", 0)
+        }
+        # Desglosar los talles en columnas dinámicas
+        for talle, cant in data.get("curva_elegida", {}).items():
+            fila[f"T-{talle}"] = cant
+        filas.append(fila)
+        
+    if filas:
+        # Convertir a DataFrame de pandas
+        df = pd.DataFrame(filas).fillna(0)
+        
+        # Ordenar columnas para que los talles queden al final
+        cols_base = ["Artículo", "Precio Unit. ($)", "Pares Totales"]
+        cols_talles = sorted([c for c in df.columns if c.startswith("T-")])
+        df = df[cols_base + cols_talles]
+        
+        # Formatear números para que no salgan con decimales .0
+        for col in cols_talles + ["Pares Totales"]:
+            df[col] = df[col].astype(int)
+                
+        # Mostrar tabla interactiva en Streamlit
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Preparar archivo Excel en memoria
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Nota de Pedido')
+        excel_data = output.getvalue()
+        
+        # Botón de exportación
+        st.download_button(
+            label="📊 Descargar Excel", 
+            data=excel_data, 
+            file_name=f"NdP_{codigo_pedido}.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"xls_{codigo_pedido}_{uuid.uuid4().hex[:5]}"
+        )
+        
+
 # --- GENERADOR DE PDF ---
 @st.cache_data(show_spinner=False)
 def generar_pdf_catalogo(productos, marca, titulo_cat):
@@ -313,7 +362,7 @@ else:
                 with st.expander(f"[{ndp['estado']}] {ndp['codigo_acceso']} | Cliente: {ndp['nombre_cliente_referencia']} | Total: ${ndp['monto_total']:,.0f}"):
                     st.write(f"**Categoría Compartida:** {ndp['categoria_compartida']} | **Descuento:** {ndp['descuento']}%")
                     if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'):
-                        st.json(ndp['detalle_json'])
+                        mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
                     elif ndp['estado'] == "En Proceso":
                         st.info("El cliente está armando el pedido en este momento.")
 
@@ -575,4 +624,4 @@ else:
             for ndp in sorted(res_pedidos, key=lambda x: x['id'], reverse=True):
                 with st.expander(f"Código: {ndp['codigo_acceso']} | Fábrica: {ndp['proveedor_email']} | Total: ${ndp['monto_total']:,.0f}"):
                     st.write(f"**Categoría:** {ndp['categoria_compartida']} | **Descuento Aplicado:** {ndp['descuento']}% | **Pares Totales:** {ndp['pares_totales']}")
-                    st.json(ndp['detalle_json'])
+                    mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
