@@ -150,20 +150,44 @@ def dialog_ampliar_imagen(url, articulo):
 @st.dialog("Compartir Código NdP")
 def dialog_compartir_categoria(categoria):
     st.write(f"Compartiendo: **{categoria}**")
-    cliente = st.text_input("Referencia (Ej: Local Centro)").strip()
-    descuento = st.text_input("Descuento en Cascada (Ej: 10+5+2)", placeholder="Opcional. Dejar vacío si es 0.").strip()
-    if not descuento: descuento = "0"
+    
+    # HISTORIAL DE CLIENTES
+    res_clientes = supabase.table("notas_pedido").select("nombre_cliente_referencia").eq("proveedor_email", st.session_state.usuario_actual).execute()
+    clientes_unicos = sorted(list(set([c['nombre_cliente_referencia'] for c in res_clientes.data if c.get('nombre_cliente_referencia')])))
+    
+    opcion_cliente = st.selectbox("Cliente", ["-- Nuevo Cliente --"] + clientes_unicos)
+    if opcion_cliente == "-- Nuevo Cliente --":
+        cliente_final = st.text_input("Nombre del nuevo cliente:").strip()
+        historial_desc = []
+    else:
+        cliente_final = opcion_cliente
+        # Extraer descuentos usados previamente con este cliente
+        res_desc = supabase.table("notas_pedido").select("descuento").eq("proveedor_email", st.session_state.usuario_actual).eq("nombre_cliente_referencia", cliente_final).execute()
+        historial_desc = sorted(list(set([d['descuento'] for d in res_desc.data if d.get('descuento') and d['descuento'] != "0"])))
+
+    # HISTORIAL DE DESCUENTOS
+    if historial_desc:
+        opcion_desc = st.selectbox(f"Descuentos históricos de {cliente_final}", ["-- Sin Descuento --", "-- Crear Nuevo --"] + historial_desc)
+    else:
+        opcion_desc = st.selectbox("Descuento", ["-- Sin Descuento --", "-- Crear Nuevo --"])
+
+    if opcion_desc == "-- Crear Nuevo --":
+        descuento_final = st.text_input("Ingresar nuevo descuento en Cascada (Ej: 10+5)").strip()
+    elif opcion_desc == "-- Sin Descuento --":
+        descuento_final = "0"
+    else:
+        descuento_final = opcion_desc
     
     if st.button("Generar Código", type="primary"):
-        if cliente:
+        if cliente_final:
             codigo = f"NDP-{uuid.uuid4().hex[:5].upper()}"
             try:
                 supabase.table("notas_pedido").insert({
                     "codigo_acceso": codigo,
                     "proveedor_email": st.session_state.usuario_actual,
-                    "nombre_cliente_referencia": cliente,
+                    "nombre_cliente_referencia": cliente_final,
                     "categoria_compartida": categoria,
-                    "descuento": descuento
+                    "descuento": descuento_final
                 }).execute()
                 st.success("✅ ¡Código Creado!")
                 st.code(codigo)
@@ -171,7 +195,7 @@ def dialog_compartir_categoria(categoria):
             except Exception as e:
                 st.error(f"Error: {e}")
         else:
-            st.warning("Debes ingresar una referencia.")
+            st.warning("Debes ingresar el nombre del cliente.")
 
 @st.dialog("Duplicar Catálogo Completo")
 def dialog_duplicar_categoria(cat_name):
@@ -337,12 +361,10 @@ else:
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-        # BI & Notas de Pedido (Fábrica)
         if st.session_state.panel_privado == "pedidos":
             st.title("📦 Mis Notas de Pedido")
             res_pedidos = supabase.table("notas_pedido").select("*").eq("proveedor_email", st.session_state.usuario_actual).execute().data or []
             
-            # FILTROS
             with st.expander("🔍 Filtros de Búsqueda"):
                 f_col1, f_col2, f_col3 = st.columns(3)
                 fechas = f_col1.date_input("Rango de Fechas", [])
@@ -354,16 +376,12 @@ else:
             for p in res_pedidos:
                 try: p_date = pd.to_datetime(p.get('created_at')).date()
                 except: p_date = None
-                
                 pasa_fecha = True
                 if len(fechas) == 2 and p_date:
                     if not (fechas[0] <= p_date <= fechas[1]): pasa_fecha = False
-                
                 pasa_cliente = (cliente_filtro == "Todos" or p.get('nombre_cliente_referencia') == cliente_filtro)
                 pasa_estado = (estado_filtro == "Todos" or p.get('estado') == estado_filtro)
-                
-                if pasa_fecha and pasa_cliente and pasa_estado:
-                    pedidos_filtrados.append(p)
+                if pasa_fecha and pasa_cliente and pasa_estado: pedidos_filtrados.append(p)
 
             finalizados = [p for p in pedidos_filtrados if p['estado'] == 'Finalizado']
             c1, c2, c3 = st.columns(3)
@@ -384,12 +402,10 @@ else:
                     elif ndp['estado'] == "En Proceso":
                         st.info("El cliente está armando el pedido en este momento.")
 
-        # CARGA
         elif st.session_state.panel_privado == "carga":
             st.title(f"🏭 Carga de Calzado")
-            st.info("Funcionalidad de carga oculta por brevedad en este ejemplo. (Utiliza tu bloque de carga original).")
+            st.info("Funcionalidad de carga oculta por brevedad en este ejemplo. (Utiliza tu bloque original de carga manual y excel).")
 
-        # CATÁLOGOS: VISTA DE GRILLA -> VISTA DE DETALLE
         elif st.session_state.panel_privado == "catalogo":
             if st.session_state.cat_activa is None:
                 st.title(f"🏭 Mis Catálogos | {st.session_state.marca_actual}")
@@ -405,22 +421,17 @@ else:
                                 c_abrir, c_comp = st.columns(2)
                                 with c_abrir:
                                     if st.button("📂 Abrir", key=f"abr_{idx}", use_container_width=True):
-                                        st.session_state.cat_activa = cat_name
-                                        st.rerun()
+                                        st.session_state.cat_activa = cat_name; st.rerun()
                                 with c_comp:
-                                    if st.button("🔗 Compartir", key=f"cmp_{idx}", use_container_width=True):
-                                        dialog_compartir_categoria(cat_name)
-                                if st.button("📋 Duplicar Catálogo", key=f"dup_{idx}", use_container_width=True):
-                                    dialog_duplicar_categoria(cat_name)
+                                    if st.button("🔗 Compartir", key=f"cmp_{idx}", use_container_width=True): dialog_compartir_categoria(cat_name)
+                                if st.button("📋 Duplicar Catálogo", key=f"dup_{idx}", use_container_width=True): dialog_duplicar_categoria(cat_name)
                 else:
                     st.info("Aún no tienes productos en tu catálogo.")
             else:
                 cat_name = st.session_state.cat_activa
                 c_back, c_titulo, c_comp, c_pdf = st.columns([1, 4, 1.5, 1.5], vertical_alignment="bottom")
                 with c_back:
-                    if st.button("🔙 Volver"):
-                        st.session_state.cat_activa = None
-                        st.rerun()
+                    if st.button("🔙 Volver"): st.session_state.cat_activa = None; st.rerun()
                 with c_titulo:
                     st.markdown(f"<h2 style='color: #FFB300; margin-bottom: 0px;'>📁 {cat_name}</h2>", unsafe_allow_html=True)
                 with c_comp:
@@ -431,8 +442,7 @@ else:
                 
                 with c_pdf:
                     pdf_data = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name)
-                    if pdf_data:
-                        st.download_button("📥 PDF", data=pdf_data, file_name=f"{cat_name}.pdf", mime="application/pdf", use_container_width=True)
+                    if pdf_data: st.download_button("📥 PDF", data=pdf_data, file_name=f"{cat_name}.pdf", mime="application/pdf", use_container_width=True)
                 
                 st.write("---")
                 for p in prods_cat:
@@ -443,8 +453,7 @@ else:
                             else:
                                 if st.button("📷", key=f"f_{p['id']}"): dialog_subir_foto(p['id'], p['articulo'])
                         with c_lupa:
-                            if p.get("foto_url"):
-                                if st.button("🔍", key=f"z_{p['id']}"): dialog_ampliar_imagen(p["foto_url"], p['articulo'])
+                            if p.get("foto_url") and st.button("🔍", key=f"z_{p['id']}"): dialog_ampliar_imagen(p["foto_url"], p['articulo'])
                         with c_vid:
                             if p.get("video_url"): st.link_button("▶️", p["video_url"])
                         with c_info:
@@ -459,9 +468,7 @@ else:
                         with c_edit:
                             if st.button("✏️", key=f"e_{p['id']}"): dialog_editar_producto(p)
                         with c_del:
-                            if st.button("🗑️", key=f"d_{p['id']}"): 
-                                supabase.table("productos").delete().eq("id", p['id']).execute()
-                                st.rerun()
+                            if st.button("🗑️", key=f"d_{p['id']}"): supabase.table("productos").delete().eq("id", p['id']).execute(); st.rerun()
 
     # ----------------------------------------------------
     # PANEL REVENDEDOR
@@ -506,7 +513,6 @@ else:
                 cod = st.session_state.ndp_activa
                 ndp_data = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod).execute().data[0]
                 
-                # PARSEO DEL DESCUENTO
                 desc_str = ndp_data.get('descuento', '0')
                 precio_desc_ejemplo, hay_descuento = calcular_precio_descuento_cascada(100, desc_str)
                 
@@ -533,33 +539,52 @@ else:
                         with c2:
                             st.markdown(f"**{p['articulo']}**<br><span style='color:gray; font-size:14px;'>{p.get('color','')}</span>", unsafe_allow_html=True)
                         with c3:
-                            st.markdown(f"<span style='font-size:12px; color:#17A2B8;'>Sugerencia Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
+                            c_sug_text, c_sug_btn = st.columns([3, 2])
+                            with c_sug_text: st.markdown(f"<span style='font-size:12px; color:#17A2B8;'>Curva Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
                             
                             talles = []
                             if str(p.get('talle_desde','')).isdigit() and str(p.get('talle_hasta','')).isdigit():
                                 talles = [str(i) for i in range(int(p['talle_desde']), int(p['talle_hasta'])+1)]
-                            else:
-                                talles = [f"T-{i+1}" for i in range(len(p.get('curva','').split('-')))] if p.get('curva') != 'N/A' else ["Único"]
+                            else: talles = [f"T-{i+1}" for i in range(len(p.get('curva','').split('-')))] if p.get('curva') != 'N/A' else ["Único"]
                             if not talles: talles = ["Único"]
                             
-                            # Precarga de curva sugerida
                             curva_arr = [int(x) for x in p.get('curva','').split('-') if x.isdigit()] if p.get('curva') != 'N/A' else []
                             
+                            with c_sug_btn:
+                                if p.get('curva') != 'N/A' and st.button("📥 Cargar curva sugerida", key=f"sug_{p['id']}", help="Autocompletar con la sugerencia de la fábrica"):
+                                    for i, t in enumerate(talles):
+                                        st.session_state[f"t_{p['id']}_{t}"] = curva_arr[i] if i < len(curva_arr) else 0
+                                    st.rerun()
+
                             cols_talles = st.columns(len(talles))
                             detalle_temporal = {}
                             
                             for i, t in enumerate(talles):
                                 with cols_talles[i]:
-                                    val_defecto = curva_arr[i] if i < len(curva_arr) else 0
-                                    # Si ya lo guardó en el carrito, mostramos lo guardado
-                                    if str(p['id']) in st.session_state[f"cart_{cod}"]:
-                                        val_defecto = st.session_state[f"cart_{cod}"][str(p['id'])]["curva_elegida"].get(t, 0)
-                                        
-                                    val = st.number_input(t, min_value=0, step=1, value=val_defecto, key=f"t_{p['id']}_{t}")
+                                    if f"t_{p['id']}_{t}" not in st.session_state:
+                                        if str(p['id']) in st.session_state[f"cart_{cod}"]:
+                                            st.session_state[f"t_{p['id']}_{t}"] = st.session_state[f"cart_{cod}"][str(p['id'])]["curva_elegida"].get(t, 0)
+                                        else:
+                                            st.session_state[f"t_{p['id']}_{t}"] = 0
+                                            
+                                    val = st.number_input(t, min_value=0, step=1, key=f"t_{p['id']}_{t}")
                                     if val > 0: detalle_temporal[t] = val
 
-                            # BOTÓN DE CONFIRMACIÓN POR PRODUCTO
-                            if st.button("✅ Aplicar a la NdP", key=f"btn_add_{p['id']}"):
+                            # LOGICA DE BOTON ROJO -> VERDE
+                            item_guardado = st.session_state[f"cart_{cod}"].get(str(p['id']), {}).get("curva_elegida", {})
+                            estado_guardado = (detalle_temporal == item_guardado)
+                            
+                            if estado_guardado and sum(detalle_temporal.values()) > 0:
+                                btn_txt = "✅ Aplicado (Guardado)"
+                                btn_type = "secondary"
+                            elif detalle_temporal == {} and item_guardado == {}:
+                                btn_txt = "➕ Agregar al pedido"
+                                btn_type = "secondary"
+                            else:
+                                btn_txt = "🔴 Aplicar Cambios"
+                                btn_type = "primary"
+                                
+                            if st.button(btn_txt, key=f"btn_add_{p['id']}", type=btn_type):
                                 if detalle_temporal:
                                     st.session_state[f"cart_{cod}"][str(p['id'])] = {
                                         "articulo": p['articulo'],
@@ -567,46 +592,38 @@ else:
                                         "pares_totales": sum(detalle_temporal.values()),
                                         "curva_elegida": detalle_temporal
                                     }
-                                    st.toast(f"Agregado: {p['articulo']}")
                                 else:
                                     if str(p['id']) in st.session_state[f"cart_{cod}"]:
                                         del st.session_state[f"cart_{cod}"][str(p['id'])]
-                                        st.toast(f"Removido: {p['articulo']}")
+                                st.rerun()
 
                         with c4:
                             if hay_descuento:
                                 st.markdown(f"<span style='text-decoration:line-through; color:gray; font-size:14px;'>${p['precio']:,.0f}</span>", unsafe_allow_html=True)
                             st.markdown(f"<h4 style='color:#00a650; margin:0;'>${precio_final:,.0f}</h4>", unsafe_allow_html=True)
                             
-                            pares_guardados = st.session_state[f"cart_{cod}"].get(str(p['id']), {}).get("pares_totales", 0)
-                            if pares_guardados > 0:
-                                st.caption(f"Subtotal: ${pares_guardados * precio_final:,.0f}")
+                            pares_temp = sum(detalle_temporal.values())
+                            if pares_temp > 0: st.caption(f"Subtotal: ${pares_temp * precio_final:,.0f}")
                                 
                 st.write("---")
                 total_pares = sum(item["pares_totales"] for item in st.session_state[f"cart_{cod}"].values())
                 total_plata = sum(item["pares_totales"] * item["precio_unitario"] for item in st.session_state[f"cart_{cod}"].values())
                 
                 c_tot1, c_tot2, c_btn = st.columns([3, 3, 4], vertical_alignment="center")
-                c_tot1.markdown(f"### Pares: {total_pares}")
+                c_tot1.markdown(f"### Pares Guardados: {total_pares}")
                 c_tot2.markdown(f"### Total: ${total_plata:,.0f}")
                 
                 with c_btn:
                     if st.button("✅ Finalizar Pedido Definitivo", type="primary", use_container_width=True):
                         detalle_final = st.session_state[f"cart_{cod}"]
-                        if not detalle_final:
-                            st.error("Debes presionar '✅ Aplicar a la NdP' en al menos un producto.")
+                        if not detalle_final: st.error("Debes presionar '✅ Aplicar a la NdP' en al menos un producto.")
                         else:
                             supabase.table("notas_pedido").update({
-                                "estado": "Finalizado",
-                                "monto_total": total_plata,
-                                "pares_totales": total_pares,
-                                "detalle_json": detalle_final
+                                "estado": "Finalizado", "monto_total": total_plata, "pares_totales": total_pares, "detalle_json": detalle_final
                             }).eq("id", ndp_data['id']).execute()
                             st.session_state.ndp_activa = None
                             st.success("¡Pedido enviado a la fábrica exitosamente!")
-                            time.sleep(2)
-                            st.session_state.panel_privado = "mis_pedidos"
-                            st.rerun()
+                            time.sleep(2); st.session_state.panel_privado = "mis_pedidos"; st.rerun()
 
         elif st.session_state.panel_privado == "mis_pedidos":
             st.title("📦 Mis Pedidos Históricos")
