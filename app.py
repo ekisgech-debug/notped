@@ -62,23 +62,53 @@ if st.session_state.usuario_actual is None and "uid" in st.query_params:
             st.session_state.panel_privado = st.query_params.get("panel", "pedidos")
     except: pass
 
+# --- LINK DIRECTO: AUTO-ASIGNAR O CLONAR CÓDIGO NDP ---
 if "codigo" in st.query_params and st.session_state.usuario_actual and st.session_state.rol_actual == "revendedor":
     cod_magico = st.query_params["codigo"]
     res_magico = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_magico).execute()
     if res_magico.data:
         ndp_m = res_magico.data[0]
-        if ndp_m['estado'] == "Enviado" and not ndp_m['revendedor_email']:
-            supabase.table("notas_pedido").update({"revendedor_email": st.session_state.usuario_actual, "estado": "En Proceso"}).eq("id", ndp_m['id']).execute()
-            st.session_state.ndp_activa = cod_magico
+        
+        # Si es un enlace público multiuso, le creamos una copia privada al revendedor
+        if ndp_m['nombre_cliente_referencia'] == "Enlace Público (Multiuso)":
+            nuevo_codigo = f"NDP-{uuid.uuid4().hex[:5].upper()}"
+            supabase.table("notas_pedido").insert({
+                "codigo_acceso": nuevo_codigo,
+                "proveedor_email": ndp_m['proveedor_email'],
+                "revendedor_email": st.session_state.usuario_actual,
+                "nombre_cliente_referencia": st.session_state.marca_actual,
+                "categoria_compartida": ndp_m['categoria_compartida'],
+                "descuento": ndp_m['descuento'],
+                "estado": "En Proceso"
+            }).execute()
+            st.session_state.ndp_activa = nuevo_codigo
             st.session_state.panel_privado = "ingresar_ndp"
-        elif ndp_m['revendedor_email'] == st.session_state.usuario_actual and ndp_m['estado'] == "En Proceso":
-            st.session_state.ndp_activa = cod_magico
-            st.session_state.panel_privado = "ingresar_ndp"
+            
+        # Si es un enlace privado, lo reclama normalmente
+        else:
+            if ndp_m['estado'] == "Enviado" and not ndp_m['revendedor_email']:
+                supabase.table("notas_pedido").update({"revendedor_email": st.session_state.usuario_actual, "estado": "En Proceso"}).eq("id", ndp_m['id']).execute()
+                st.session_state.ndp_activa = cod_magico
+                st.session_state.panel_privado = "ingresar_ndp"
+            elif ndp_m['revendedor_email'] == st.session_state.usuario_actual and ndp_m['estado'] == "En Proceso":
+                st.session_state.ndp_activa = cod_magico
+                st.session_state.panel_privado = "ingresar_ndp"
+                
     del st.query_params["codigo"]
 
 # ========================================================
 # FUNCIONES AUXILIARES
 # ========================================================
+def get_base_url():
+    # Intenta obtener el host actual de los headers de Streamlit, si falla usa un relativo
+    try:
+        from streamlit.web.server.websocket_headers import _get_websocket_headers
+        headers = _get_websocket_headers()
+        host = headers.get("Host")
+        return f"http://{host}" if "localhost" in host else f"https://{host}"
+    except:
+        return "" # Si falla, usamos ruta relativa
+
 def calcular_precio_descuento_cascada(precio_base, desc_str):
     if not desc_str or str(desc_str).strip() == "0": return float(precio_base), False
     try:
@@ -210,24 +240,29 @@ def dialog_ampliar_imagen(url, articulo):
 def dialog_compartir_categoria(categoria):
     st.write(f"Compartiendo: **{categoria}**")
     
+    tipo_audiencia = st.radio("Audiencia", ["Enlace Público (Multiuso / Redes)", "Cliente Específico (Un solo uso)"])
     tipo_cat = st.radio("Formato a compartir", ["Catálogo de Venta (Con Precios)", "Muestrario (Sin Precios)"])
     
-    res_clientes = supabase.table("notas_pedido").select("nombre_cliente_referencia").eq("proveedor_email", st.session_state.usuario_actual).execute()
-    clientes_unicos = sorted(list(set([c['nombre_cliente_referencia'] for c in res_clientes.data if c.get('nombre_cliente_referencia')])))
-    
-    opcion_cliente = st.selectbox("Cliente", ["-- Nuevo Cliente --"] + clientes_unicos)
-    if opcion_cliente == "-- Nuevo Cliente --":
-        cliente_final = st.text_input("Nombre del nuevo cliente:").strip()
+    if tipo_audiencia == "Enlace Público (Multiuso / Redes)":
+        cliente_final = "Enlace Público (Multiuso)"
         historial_desc = []
     else:
-        cliente_final = opcion_cliente
-        res_desc = supabase.table("notas_pedido").select("descuento").eq("proveedor_email", st.session_state.usuario_actual).eq("nombre_cliente_referencia", cliente_final).execute()
-        historial_desc = sorted(list(set([d['descuento'] for d in res_desc.data if d.get('descuento') and d['descuento'] != "0"])))
+        res_clientes = supabase.table("notas_pedido").select("nombre_cliente_referencia").eq("proveedor_email", st.session_state.usuario_actual).execute()
+        clientes_unicos = sorted(list(set([c['nombre_cliente_referencia'] for c in res_clientes.data if c.get('nombre_cliente_referencia') and c['nombre_cliente_referencia'] != "Enlace Público (Multiuso)"])))
+        
+        opcion_cliente = st.selectbox("Cliente", ["-- Nuevo Cliente --"] + clientes_unicos)
+        if opcion_cliente == "-- Nuevo Cliente --":
+            cliente_final = st.text_input("Nombre del nuevo cliente:").strip()
+            historial_desc = []
+        else:
+            cliente_final = opcion_cliente
+            res_desc = supabase.table("notas_pedido").select("descuento").eq("proveedor_email", st.session_state.usuario_actual).eq("nombre_cliente_referencia", cliente_final).execute()
+            historial_desc = sorted(list(set([d['descuento'] for d in res_desc.data if d.get('descuento') and d['descuento'] != "0"])))
 
     if tipo_cat == "Muestrario (Sin Precios)":
         descuento_final = "0"
     else:
-        if historial_desc: opcion_desc = st.selectbox(f"Descuentos de {cliente_final}", ["-- Sin Descuento --", "-- Crear Nuevo --"] + historial_desc)
+        if historial_desc: opcion_desc = st.selectbox(f"Descuentos guardados", ["-- Sin Descuento --", "-- Crear Nuevo --"] + historial_desc)
         else: opcion_desc = st.selectbox("Descuento", ["-- Sin Descuento --", "-- Crear Nuevo --"])
         if opcion_desc == "-- Crear Nuevo --": descuento_final = st.text_input("Desc. en Cascada (Ej: 10+5)").strip()
         elif opcion_desc == "-- Sin Descuento --": descuento_final = "0"
@@ -242,10 +277,16 @@ def dialog_compartir_categoria(categoria):
                     "codigo_acceso": codigo, "proveedor_email": st.session_state.usuario_actual, 
                     "nombre_cliente_referencia": cliente_final, "categoria_compartida": cat_guardar, "descuento": descuento_final
                 }).execute()
-                st.success("✅ ¡Código Creado!")
-                link_magico = f"https://tunombredeweb.com/?codigo={codigo}"
+                st.success("✅ ¡Enlace Creado!")
+                
+                base = get_base_url()
+                link_magico = f"{base}/?codigo={codigo}"
                 st.code(link_magico)
-                st.info("Copia el enlace y envíalo al cliente por WhatsApp. Entrarán directo.")
+                
+                if tipo_audiencia == "Enlace Público (Multiuso / Redes)":
+                    st.info("Copia el enlace superior. Cualquier persona que ingrese podrá ver el catálogo y si inicia sesión se le creará un pedido privado.")
+                else:
+                    st.info("Copia el enlace y envíalo al cliente por WhatsApp. Entrará directo.")
             except Exception as e: st.error(f"Error: {e}")
         else: st.warning("Debes ingresar el nombre del cliente.")
 
@@ -312,6 +353,59 @@ def generar_pdf_catalogo(productos, marca, titulo_cat, con_precios=True):
 # FLUX 1: ENTORNO PÚBLICO
 # ========================================================
 if st.session_state.usuario_actual is None:
+    # --- VERIFICACIÓN DE CATÁLOGO PÚBLICO ANTES DEL LOGIN ---
+    if "codigo" in st.query_params:
+        cod_publico = st.query_params["codigo"]
+        res_pub = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_publico).execute()
+        
+        if res_pub.data:
+            ndp_pub = res_pub.data[0]
+            es_muestrario = "|MUESTRARIO" in ndp_pub['categoria_compartida']
+            cat_display = ndp_pub['categoria_compartida'].replace("|MUESTRARIO", "")
+            
+            # Encabezado para visitante
+            col_logo, col_nav = st.columns([2, 3])
+            with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B</span></h2>", unsafe_allow_html=True)
+            with col_nav:
+                if st.button("🔐 Iniciar Sesión para Pedir", type="primary", use_container_width=True):
+                    st.session_state.seccion_publica = "login"
+                    st.rerun()
+                    
+            st.write("---")
+            st.info("👋 **Estás viendo este catálogo en Modo Invitado.** Para cargar cantidades y enviar un pedido a la fábrica, por favor inicia sesión o regístrate.")
+            
+            if es_muestrario:
+                st.markdown(f"<h3 style='color:#00a650;'>📦 Muestrario: {cat_display} <span style='font-size:16px; background-color:#17A2B8; padding:3px 8px; border-radius:5px; color:white;'>Sin Precios</span></h3>", unsafe_allow_html=True)
+            else:
+                desc_str = ndp_pub.get('descuento', '0')
+                if desc_str != "0": st.markdown(f"<h3 style='color:#00a650;'>📦 Catálogo: {cat_display} <span style='font-size:16px; background-color:#FFB300; padding:3px 8px; border-radius:5px; color:black;'>Desc: {desc_str}%</span></h3>", unsafe_allow_html=True)
+                else: st.markdown(f"<h3 style='color:#00a650;'>📦 Catálogo: {cat_display}</h3>", unsafe_allow_html=True)
+            
+            prods = supabase.table("productos").select("*").eq("proveedor", ndp_pub['proveedor_email'])
+            if cat_display != "Todo el Catálogo": prods = prods.eq("categoria", cat_display)
+            prods = prods.order("articulo").execute().data
+            
+            for p in prods:
+                precio_final, hay_descuento = calcular_precio_descuento_cascada(p['precio'], ndp_pub.get('descuento', '0'))
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([1.5, 3.5, 3, 2], vertical_alignment="center")
+                    with c1:
+                        if p.get('foto_url'): st.image(p['foto_url'])
+                    with c2:
+                        st.markdown(f"**{p['articulo']}**<br><span style='color:gray; font-size:14px;'>{p.get('color','')}</span><br><span style='font-size:12px;'>{p.get('descripcion','')}</span>", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"<span style='font-size:13px; color:#17A2B8;'>Curva Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
+                        if p.get("curva") != "N/A":
+                            st.caption(f"Talles: {p.get('talle_desde')} al {p.get('talle_hasta')}")
+                    with c4:
+                        if not es_muestrario:
+                            if hay_descuento: st.markdown(f"<span style='text-decoration:line-through; color:gray; font-size:14px;'>${p['precio']:,.0f}</span>", unsafe_allow_html=True)
+                            st.markdown(f"<h4 style='color:#00a650; margin:0;'>${precio_final:,.0f}</h4>", unsafe_allow_html=True)
+            
+            # Detenemos la ejecución aquí para que no dibuje el login por defecto
+            st.stop()
+
+    # --- PANTALLA NORMAL DE INICIO ---
     st.query_params.clear() 
     col_logo, col_nav = st.columns([2, 3])
     with col_logo: st.markdown("<h2 style='margin:0;'>👞 NotPed <span style='font-size:14px; color:gray;'>B2B</span></h2>", unsafe_allow_html=True)
@@ -683,7 +777,17 @@ else:
                         res = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_input).execute()
                         if res.data:
                             ndp = res.data[0]
-                            if ndp['estado'] == "Enviado" and not ndp['revendedor_email']:
+                            # Clona el público
+                            if ndp['nombre_cliente_referencia'] == "Enlace Público (Multiuso)":
+                                n_cod = f"NDP-{uuid.uuid4().hex[:5].upper()}"
+                                supabase.table("notas_pedido").insert({
+                                    "codigo_acceso": n_cod, "proveedor_email": ndp['proveedor_email'], "revendedor_email": st.session_state.usuario_actual,
+                                    "nombre_cliente_referencia": st.session_state.marca_actual, "categoria_compartida": ndp['categoria_compartida'],
+                                    "descuento": ndp['descuento'], "estado": "En Proceso"
+                                }).execute()
+                                st.session_state.ndp_activa = n_cod; st.rerun()
+                            # Reclama privado
+                            elif ndp['estado'] == "Enviado" and not ndp['revendedor_email']:
                                 supabase.table("notas_pedido").update({"revendedor_email": st.session_state.usuario_actual, "estado": "En Proceso"}).eq("id", ndp['id']).execute()
                                 st.session_state.ndp_activa = cod_input; st.rerun()
                             elif ndp['revendedor_email'] == st.session_state.usuario_actual and ndp['estado'] == "En Proceso":
@@ -713,7 +817,6 @@ else:
                 if cat_display != "Todo el Catálogo": prods = prods.eq("categoria", cat_display)
                 prods = prods.order("articulo").execute().data
                 
-                # PRECARGA AUTOMATICA DE CURVA SUGERIDA
                 if f"cart_{cod}" not in st.session_state: 
                     st.session_state[f"cart_{cod}"] = {}
                     for p in prods:
@@ -789,8 +892,7 @@ else:
                 total_plata = sum(item["pares_totales"] * item["precio_unitario"] for item in st.session_state[f"cart_{cod}"].values())
                 c_tot1, c_tot2, c_btn = st.columns([3, 3, 4], vertical_alignment="center")
                 c_tot1.markdown(f"### Pares Guardados: {total_pares}")
-                if not es_muestrario:
-                    c_tot2.markdown(f"### Total General: ${total_plata:,.0f}")
+                if not es_muestrario: c_tot2.markdown(f"### Total General: ${total_plata:,.0f}")
                 
                 with c_btn:
                     if st.button("✅ Enviar Pedido Definitivo", type="primary", use_container_width=True):
@@ -804,7 +906,6 @@ else:
             st.title("📦 Mis Pedidos")
             res_pedidos = supabase.table("notas_pedido").select("*").eq("revendedor_email", st.session_state.usuario_actual).execute().data or []
             
-            # --- MAPEO INTELIGENTE DE NOMBRES DE FÁBRICAS ---
             res_provs = supabase.table("usuarios").select("email, nombre_marca").eq("rol", "proveedor").execute()
             mapa_fabricas = {u['email']: u['nombre_marca'] for u in res_provs.data} if res_provs.data else {}
             
