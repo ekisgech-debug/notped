@@ -52,7 +52,6 @@ if "cat_preseleccionada" not in st.session_state: st.session_state.cat_preselecc
 
 fk = st.session_state.form_key 
 
-# --- RECUPERACIÓN DE SESIÓN POR URL ---
 if st.session_state.usuario_actual is None and "uid" in st.query_params:
     try:
         res = supabase.table("usuarios").select("*").eq("id", st.query_params["uid"]).execute()
@@ -63,7 +62,6 @@ if st.session_state.usuario_actual is None and "uid" in st.query_params:
             st.session_state.panel_privado = st.query_params.get("panel", "pedidos")
     except: pass
 
-# --- LINK DIRECTO: AUTO-ASIGNAR CÓDIGO NDP ---
 if "codigo" in st.query_params and st.session_state.usuario_actual and st.session_state.rol_actual == "revendedor":
     cod_magico = st.query_params["codigo"]
     res_magico = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_magico).execute()
@@ -76,7 +74,6 @@ if "codigo" in st.query_params and st.session_state.usuario_actual and st.sessio
         elif ndp_m['revendedor_email'] == st.session_state.usuario_actual and ndp_m['estado'] == "En Proceso":
             st.session_state.ndp_activa = cod_magico
             st.session_state.panel_privado = "ingresar_ndp"
-    # Quitamos el parametro para evitar bucles
     del st.query_params["codigo"]
 
 # ========================================================
@@ -196,7 +193,6 @@ def dialog_compartir_categoria(categoria):
                     "codigo_acceso": codigo, "proveedor_email": st.session_state.usuario_actual, "nombre_cliente_referencia": cliente_final, "categoria_compartida": categoria, "descuento": descuento_final
                 }).execute()
                 st.success("✅ ¡Código Creado!")
-                # Enlace directo
                 link_magico = f"https://tunombredeweb.com/?codigo={codigo}"
                 st.code(link_magico)
                 st.info("Copia el enlace de arriba y envíalo al cliente por WhatsApp. No necesitarán copiar el código, entrarán directo.")
@@ -219,7 +215,6 @@ def dialog_duplicar_categoria(cat_name):
                 st.rerun()
         else: st.warning("Ingresa un nombre diferente al original.")
 
-# --- GENERADOR DE PDF ---
 @st.cache_data(show_spinner=False)
 def generar_pdf_catalogo(productos, marca, titulo_cat):
     try:
@@ -313,8 +308,7 @@ if st.session_state.usuario_actual is None:
                         chequeo = supabase.table("usuarios").select("id").eq("email", email).execute()
                         if not chequeo.data:
                             supabase.table("usuarios").insert({"email": email, "contrasena": p1, "rol": rol, "nombre_marca": marca}).execute()
-                            st.success("✅ Cuenta creada.")
-                            time.sleep(1); st.session_state.seccion_publica = "login"; st.rerun()
+                            st.success("✅ Cuenta creada."); time.sleep(1); st.session_state.seccion_publica = "login"; st.rerun()
 
 # ========================================================
 # FLUX 2: ENTORNO PRIVADO
@@ -343,18 +337,21 @@ else:
                 st.rerun()
             st.write("---")
             
-            # --- NUEVA SECCIÓN: PERFIL Y CONTRASEÑA ---
             with st.expander("🔑 Mi Perfil / Contraseña"):
-                n_pwd = st.text_input("Nueva contraseña:", type="password", key="pwd_f")
-                if st.button("Actualizar", key="btn_pwd_f"):
-                    if n_pwd:
-                        supabase.table("usuarios").update({"contrasena": n_pwd}).eq("email", st.session_state.usuario_actual).execute()
-                        st.success("¡Contraseña actualizada!")
+                with st.form("form_pwd_f", clear_on_submit=True):
+                    n_pwd1 = st.text_input("Nueva contraseña:", type="password")
+                    n_pwd2 = st.text_input("Confirmar contraseña:", type="password")
+                    if st.form_submit_button("Actualizar", type="primary"):
+                        if n_pwd1 and n_pwd2:
+                            if n_pwd1 == n_pwd2:
+                                supabase.table("usuarios").update({"contrasena": n_pwd1}).eq("email", st.session_state.usuario_actual).execute()
+                                st.success("¡Contraseña actualizada!")
+                            else:
+                                st.error("❌ Las contraseñas no coinciden.")
             
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-        # PEDIDOS
         if st.session_state.panel_privado == "pedidos":
             st.title("📦 Mis Notas de Pedido")
             res_pedidos = supabase.table("notas_pedido").select("*").eq("proveedor_email", st.session_state.usuario_actual).execute().data or []
@@ -393,7 +390,6 @@ else:
                     if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
                     elif ndp['estado'] == "En Proceso": st.info("El cliente está armando el pedido en este momento.")
 
-        # CARGA
         elif st.session_state.panel_privado == "carga":
             st.title(f"🏭 Panel Fábrica | Carga de Calzado")
             
@@ -456,13 +452,21 @@ else:
                 for i, talle in enumerate(talles_list_str):
                     with cols_talles[i]:
                         val = st.number_input(f"T-{talle}", min_value=0, step=1, value=1, key=f"talle_{i}_{fk}")
-                        valores_curva.append(str(val))
-                curva_final_str = "-".join(valores_curva)
+                        valores_curva.append(val)
+                
+                # CÁLCULOS EN TIEMPO REAL PARA LA FÁBRICA
+                total_pares_curva = sum(valores_curva)
+                curva_final_str = "-".join([str(v) for v in valores_curva])
                 
                 st.write("---")
-                col_p, col_v = st.columns(2)
+                st.info(f"👟 Total de pares en esta curva: **{total_pares_curva} pares**")
+                
+                col_p, col_v, col_t = st.columns([1.5, 2, 1.5])
                 with col_p: precio = st.number_input("Precio de Lista ($)", min_value=0.0, key=f"num_precio_{fk}")
                 with col_v: video = st.text_input("URL de YouTube (Opcional)", placeholder="Ej: https://youtu.be/...", key=f"txt_vid_{fk}")
+                with col_t:
+                    st.write("Total de la Curva completa:")
+                    st.markdown(f"<h3 style='color:#00a650; margin-top:0px;'>${(precio * total_pares_curva):,.0f}</h3>", unsafe_allow_html=True)
                 
                 foto = st.file_uploader("Subir Foto (Máx 250KB)", type=["jpg", "png", "jpeg"], key=f"file_foto_{fk}")
                 
@@ -543,7 +547,6 @@ else:
                             st.success(f"✅ ¡{len(productos_a_insertar)} productos procesados!"); time.sleep(1.5); st.session_state.panel_privado = "catalogo"; st.rerun()
                         except Exception as e: st.error(f"Error: {e}")
 
-        # CATÁLOGOS
         elif st.session_state.panel_privado == "catalogo":
             if st.session_state.cat_activa is None:
                 st.title(f"🏭 Mis Catálogos | {st.session_state.marca_actual}")
@@ -632,13 +635,17 @@ else:
                 st.rerun()
             st.write("---")
             
-            # --- NUEVA SECCIÓN: PERFIL Y CONTRASEÑA ---
             with st.expander("🔑 Mi Perfil / Contraseña"):
-                n_pwd = st.text_input("Nueva contraseña:", type="password", key="pwd_r")
-                if st.button("Actualizar", key="btn_pwd_r"):
-                    if n_pwd:
-                        supabase.table("usuarios").update({"contrasena": n_pwd}).eq("email", st.session_state.usuario_actual).execute()
-                        st.success("¡Contraseña actualizada!")
+                with st.form("form_pwd_r", clear_on_submit=True):
+                    n_pwd1 = st.text_input("Nueva contraseña:", type="password")
+                    n_pwd2 = st.text_input("Confirmar contraseña:", type="password")
+                    if st.form_submit_button("Actualizar", type="primary"):
+                        if n_pwd1 and n_pwd2:
+                            if n_pwd1 == n_pwd2:
+                                supabase.table("usuarios").update({"contrasena": n_pwd1}).eq("email", st.session_state.usuario_actual).execute()
+                                st.success("¡Contraseña actualizada!")
+                            else:
+                                st.error("❌ Las contraseñas no coinciden.")
                         
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 st.session_state.clear(); st.query_params.clear(); st.rerun()
@@ -678,73 +685,93 @@ else:
                 if ndp_data['categoria_compartida'] != "Todo el Catálogo": prods = prods.eq("categoria", ndp_data['categoria_compartida'])
                 prods = prods.order("articulo").execute().data
                 
-                if f"cart_{cod}" not in st.session_state: st.session_state[f"cart_{cod}"] = {}
+                # --- PRECARGA DEL CARRITO CON LA CURVA SUGERIDA DESDE EL INICIO ---
+                if f"cart_{cod}" not in st.session_state: 
+                    st.session_state[f"cart_{cod}"] = {}
+                    for p in prods:
+                        precio_final, _ = calcular_precio_descuento_cascada(p['precio'], desc_str)
+                        curva_arr = [int(x) for x in p.get('curva','').split('-') if x.isdigit()] if p.get('curva') != 'N/A' else []
+                        talles = []
+                        if str(p.get('talle_desde','')).isdigit() and str(p.get('talle_hasta','')).isdigit():
+                            talles = [str(i) for i in range(int(p['talle_desde']), int(p['talle_hasta'])+1)]
+                        else: talles = [f"T-{i+1}" for i in range(len(p.get('curva','').split('-')))] if p.get('curva') != 'N/A' else ["Único"]
+                        if not talles: talles = ["Único"]
+                        
+                        detalle_temp = {}
+                        for i, t in enumerate(talles):
+                            val_sug = curva_arr[i] if i < len(curva_arr) else 0
+                            if val_sug > 0: detalle_temp[t] = val_sug
+                            
+                        if detalle_temp:
+                            st.session_state[f"cart_{cod}"][str(p['id'])] = {
+                                "articulo": p['articulo'],
+                                "precio_unitario": precio_final,
+                                "pares_totales": sum(detalle_temp.values()),
+                                "curva_elegida": detalle_temp
+                            }
 
                 for p in prods:
                     precio_final, _ = calcular_precio_descuento_cascada(p['precio'], desc_str)
-                    with st.container(border=True):
+                    
+                    # --- FORMULARIO CERRADO POR PRODUCTO (EVITA REFRESH MASIVO) ---
+                    with st.form(key=f"form_prod_{p['id']}_{cod}", border=True):
                         c1, c2, c3, c4 = st.columns([1, 2, 6, 2], vertical_alignment="center")
                         with c1:
                             if p.get('foto_url'): st.image(p['foto_url'])
                         with c2:
                             st.markdown(f"**{p['articulo']}**<br><span style='color:gray; font-size:14px;'>{p.get('color','')}</span>", unsafe_allow_html=True)
                         with c3:
-                            st.markdown(f"<span style='font-size:12px; color:#17A2B8;'>Curva Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
+                            # Leer lo guardado actualmente en el carrito para mostrar totales parciales
+                            guardado = st.session_state[f"cart_{cod}"].get(str(p['id']), {}).get("curva_elegida", {})
+                            pares_prod = sum(guardado.values())
+                            
+                            st.markdown(f"<span style='font-size:13px; color:#17A2B8;'>Curva de Fábrica: {p.get('curva','N/A')} &nbsp; | &nbsp; <b>Pares Cargados: {pares_prod}</b></span>", unsafe_allow_html=True)
+                            
                             talles = []
                             if str(p.get('talle_desde','')).isdigit() and str(p.get('talle_hasta','')).isdigit():
                                 talles = [str(i) for i in range(int(p['talle_desde']), int(p['talle_hasta'])+1)]
                             else: talles = [f"T-{i+1}" for i in range(len(p.get('curva','').split('-')))] if p.get('curva') != 'N/A' else ["Único"]
                             if not talles: talles = ["Único"]
-                            
-                            curva_arr = [int(x) for x in p.get('curva','').split('-') if x.isdigit()] if p.get('curva') != 'N/A' else []
 
                             cols_talles = st.columns(len(talles))
-                            detalle_temporal = {}
-                            
                             for i, t in enumerate(talles):
                                 with cols_talles[i]:
-                                    # CARGA PREDETERMINADA DE LA CURVA SUGERIDA
-                                    val_sugerido = curva_arr[i] if i < len(curva_arr) else 0
+                                    val_def = guardado.get(t, 0)
+                                    st.number_input(t, min_value=0, step=1, value=val_def, key=f"in_{p['id']}_{t}")
                                     
-                                    if f"t_{p['id']}_{t}" not in st.session_state:
-                                        if str(p['id']) in st.session_state[f"cart_{cod}"]: 
-                                            st.session_state[f"t_{p['id']}_{t}"] = st.session_state[f"cart_{cod}"][str(p['id'])]["curva_elegida"].get(t, val_sugerido)
-                                        else: 
-                                            st.session_state[f"t_{p['id']}_{t}"] = val_sugerido
-                                            
-                                    val = st.number_input(t, min_value=0, step=1, key=f"t_{p['id']}_{t}")
-                                    if val > 0: detalle_temporal[t] = val
-
-                            item_guardado = st.session_state[f"cart_{cod}"].get(str(p['id']), {}).get("curva_elegida", {})
-                            estado_guardado = (detalle_temporal == item_guardado)
-                            
-                            if estado_guardado and sum(detalle_temporal.values()) > 0: btn_txt, btn_type = "✅ Aplicado", "secondary"
-                            elif detalle_temporal == {} and item_guardado == {}: btn_txt, btn_type = "➕ Agregar", "secondary"
-                            else: btn_txt, btn_type = "🔴 Aplicar", "primary"
-                                
-                            if st.button(btn_txt, key=f"btn_add_{p['id']}", type=btn_type):
-                                if detalle_temporal:
-                                    st.session_state[f"cart_{cod}"][str(p['id'])] = {"articulo": p['articulo'], "precio_unitario": precio_final, "pares_totales": sum(detalle_temporal.values()), "curva_elegida": detalle_temporal}
-                                else:
-                                    if str(p['id']) in st.session_state[f"cart_{cod}"]: del st.session_state[f"cart_{cod}"][str(p['id'])]
-                                st.rerun()
-
                         with c4:
                             if hay_descuento: st.markdown(f"<span style='text-decoration:line-through; color:gray; font-size:14px;'>${p['precio']:,.0f}</span>", unsafe_allow_html=True)
                             st.markdown(f"<h4 style='color:#00a650; margin:0;'>${precio_final:,.0f}</h4>", unsafe_allow_html=True)
-                            pares_temp = sum(detalle_temporal.values())
-                            if pares_temp > 0: st.caption(f"Subtotal: ${pares_temp * precio_final:,.0f}")
+                            if pares_prod > 0: st.caption(f"Subtotal: ${pares_prod * precio_final:,.0f}")
+                            
+                            if st.form_submit_button("✅ Aplicar / Modificar", type="secondary"):
+                                nuevo_detalle = {}
+                                for t in talles:
+                                    v = st.session_state[f"in_{p['id']}_{t}"]
+                                    if v > 0: nuevo_detalle[t] = v
+                                
+                                if nuevo_detalle:
+                                    st.session_state[f"cart_{cod}"][str(p['id'])] = {
+                                        "articulo": p['articulo'],
+                                        "precio_unitario": precio_final,
+                                        "pares_totales": sum(nuevo_detalle.values()),
+                                        "curva_elegida": nuevo_detalle
+                                    }
+                                else:
+                                    if str(p['id']) in st.session_state[f"cart_{cod}"]:
+                                        del st.session_state[f"cart_{cod}"][str(p['id'])]
+                                st.rerun()
                                 
                 st.write("---")
                 total_pares = sum(item["pares_totales"] for item in st.session_state[f"cart_{cod}"].values())
                 total_plata = sum(item["pares_totales"] * item["precio_unitario"] for item in st.session_state[f"cart_{cod}"].values())
                 c_tot1, c_tot2, c_btn = st.columns([3, 3, 4], vertical_alignment="center")
                 c_tot1.markdown(f"### Pares Guardados: {total_pares}")
-                c_tot2.markdown(f"### Total: ${total_plata:,.0f}")
+                c_tot2.markdown(f"### Total General: ${total_plata:,.0f}")
                 
                 with c_btn:
                     if st.button("✅ Finalizar Pedido Definitivo", type="primary", use_container_width=True):
-                        if not st.session_state[f"cart_{cod}"]: st.error("Aplica al menos un producto.")
+                        if not st.session_state[f"cart_{cod}"]: st.error("No tienes ningún producto aplicado.")
                         else:
                             supabase.table("notas_pedido").update({"estado": "Finalizado", "monto_total": total_plata, "pares_totales": total_pares, "detalle_json": st.session_state[f"cart_{cod}"]}).eq("id", ndp_data['id']).execute()
                             st.session_state.ndp_activa = None; st.success("¡Enviado!"); time.sleep(2); st.session_state.panel_privado = "mis_pedidos"; st.rerun()
@@ -786,7 +813,6 @@ else:
                     if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): 
                         mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
                     
-                    # --- NUEVO BOTÓN: CONTINUAR PEDIDO DIRECTAMENTE ---
                     elif ndp['estado'] == "En Proceso": 
                         st.info("El pedido está abierto pero sin finalizar.")
                         with c_btn_acc:
