@@ -52,6 +52,7 @@ if "cat_preseleccionada" not in st.session_state: st.session_state.cat_preselecc
 
 fk = st.session_state.form_key 
 
+# --- RECUPERACIÓN DE SESIÓN POR URL ---
 if st.session_state.usuario_actual is None and "uid" in st.query_params:
     try:
         res = supabase.table("usuarios").select("*").eq("id", st.query_params["uid"]).execute()
@@ -61,6 +62,22 @@ if st.session_state.usuario_actual is None and "uid" in st.query_params:
             st.session_state.marca_actual = res.data[0]["nombre_marca"]
             st.session_state.panel_privado = st.query_params.get("panel", "pedidos")
     except: pass
+
+# --- LINK DIRECTO: AUTO-ASIGNAR CÓDIGO NDP ---
+if "codigo" in st.query_params and st.session_state.usuario_actual and st.session_state.rol_actual == "revendedor":
+    cod_magico = st.query_params["codigo"]
+    res_magico = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_magico).execute()
+    if res_magico.data:
+        ndp_m = res_magico.data[0]
+        if ndp_m['estado'] == "Enviado" and not ndp_m['revendedor_email']:
+            supabase.table("notas_pedido").update({"revendedor_email": st.session_state.usuario_actual, "estado": "En Proceso"}).eq("id", ndp_m['id']).execute()
+            st.session_state.ndp_activa = cod_magico
+            st.session_state.panel_privado = "ingresar_ndp"
+        elif ndp_m['revendedor_email'] == st.session_state.usuario_actual and ndp_m['estado'] == "En Proceso":
+            st.session_state.ndp_activa = cod_magico
+            st.session_state.panel_privado = "ingresar_ndp"
+    # Quitamos el parametro para evitar bucles
+    del st.query_params["codigo"]
 
 # ========================================================
 # FUNCIONES AUXILIARES
@@ -171,7 +188,7 @@ def dialog_compartir_categoria(categoria):
     elif opcion_desc == "-- Sin Descuento --": descuento_final = "0"
     else: descuento_final = opcion_desc
     
-    if st.button("Generar Código", type="primary"):
+    if st.button("Generar Enlace", type="primary"):
         if cliente_final:
             codigo = f"NDP-{uuid.uuid4().hex[:5].upper()}"
             try:
@@ -179,8 +196,10 @@ def dialog_compartir_categoria(categoria):
                     "codigo_acceso": codigo, "proveedor_email": st.session_state.usuario_actual, "nombre_cliente_referencia": cliente_final, "categoria_compartida": categoria, "descuento": descuento_final
                 }).execute()
                 st.success("✅ ¡Código Creado!")
-                st.code(codigo)
-                st.info("Copia el código y envíalo al cliente.")
+                # Enlace directo
+                link_magico = f"https://tunombredeweb.com/?codigo={codigo}"
+                st.code(link_magico)
+                st.info("Copia el enlace de arriba y envíalo al cliente por WhatsApp. No necesitarán copiar el código, entrarán directo.")
             except Exception as e: st.error(f"Error: {e}")
         else: st.warning("Debes ingresar el nombre del cliente.")
 
@@ -272,7 +291,7 @@ if st.session_state.usuario_actual is None:
                         st.session_state.usuario_actual = res.data[0]["email"]
                         st.session_state.rol_actual = res.data[0]["rol"]
                         st.session_state.marca_actual = res.data[0]["nombre_marca"]
-                        st.session_state.panel_privado = "pedidos" if res.data[0]["rol"] == "proveedor" else "ingresar_ndp"
+                        st.session_state.panel_privado = "pedidos" if res.data[0]["rol"] == "proveedor" else "mis_pedidos"
                         st.session_state.remember_email = u_email if recordar else ""
                         st.query_params["uid"] = str(res.data[0]["id"])
                         st.query_params["panel"] = st.session_state.panel_privado
@@ -323,6 +342,15 @@ else:
                 st.query_params["panel"] = "carga"
                 st.rerun()
             st.write("---")
+            
+            # --- NUEVA SECCIÓN: PERFIL Y CONTRASEÑA ---
+            with st.expander("🔑 Mi Perfil / Contraseña"):
+                n_pwd = st.text_input("Nueva contraseña:", type="password", key="pwd_f")
+                if st.button("Actualizar", key="btn_pwd_f"):
+                    if n_pwd:
+                        supabase.table("usuarios").update({"contrasena": n_pwd}).eq("email", st.session_state.usuario_actual).execute()
+                        st.success("¡Contraseña actualizada!")
+            
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 st.session_state.clear(); st.query_params.clear(); st.rerun()
 
@@ -365,9 +393,7 @@ else:
                     if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
                     elif ndp['estado'] == "En Proceso": st.info("El cliente está armando el pedido en este momento.")
 
-        # ========================================================
-        # CARGA (Restaurada al 100%)
-        # ========================================================
+        # CARGA
         elif st.session_state.panel_privado == "carga":
             st.title(f"🏭 Panel Fábrica | Carga de Calzado")
             
@@ -375,7 +401,6 @@ else:
             mis_configs = res_conf.data if res_conf.data else []
             mis_categorias = [c for c in mis_configs if c['tipo'] == 'categoria']
             mis_colores = [c for c in mis_configs if c['tipo'] == 'color']
-            mis_curvas = [c for c in mis_configs if c['tipo'] == 'curva']
             
             tipo_carga = st.radio("Modo de Carga", ["Carga Manual", "Carga Masiva (Excel)"], horizontal=True)
             st.write("---")
@@ -392,22 +417,14 @@ else:
                         es_nueva_cat = True
                     else:
                         opciones_cat = ["-- Elegir --", "➕ Crear Nueva..."] + [c['nombre'] for c in mis_categorias]
-                        
-                        # Integración del atajo (+): Si venimos del catálogo, pre-seleccionar.
                         idx_def_cat = 0
                         cat_pre = st.session_state.get("cat_preseleccionada")
-                        if cat_pre in opciones_cat:
-                            idx_def_cat = opciones_cat.index(cat_pre)
-                            
+                        if cat_pre in opciones_cat: idx_def_cat = opciones_cat.index(cat_pre)
                         opcion_cat = st.selectbox("Categoría", opciones_cat, index=idx_def_cat, key=f"sel_cat_{fk}")
-                        
-                        # Limpiamos el atajo para que no quede pegado siempre
                         if cat_pre: st.session_state.cat_preseleccionada = None
-
                         if opcion_cat == "➕ Crear Nueva...": st.session_state[f"crear_cat_{fk}"] = True; st.rerun()
                         cat_final = opcion_cat if opcion_cat != "-- Elegir --" else ""
                         es_nueva_cat = False
-
                 with c_col:
                     if st.session_state.get(f"crear_col_{fk}", False):
                         col_input, col_btn = st.columns([8, 1])
@@ -436,12 +453,10 @@ else:
                 talles_list_str = [str(i) for i in range(int(t_d_sel), int(t_h_sel)+1)]
                 cols_talles = st.columns(len(talles_list_str))
                 valores_curva = []
-                
                 for i, talle in enumerate(talles_list_str):
                     with cols_talles[i]:
                         val = st.number_input(f"T-{talle}", min_value=0, step=1, value=1, key=f"talle_{i}_{fk}")
                         valores_curva.append(str(val))
-                
                 curva_final_str = "-".join(valores_curva)
                 
                 st.write("---")
@@ -525,9 +540,7 @@ else:
                             if nuevas_cats: supabase.table("configuraciones_fabrica").insert(nuevas_cats).execute()
                             if nuevas_cols: supabase.table("configuraciones_fabrica").insert(nuevas_cols).execute()
                             if productos_a_insertar: supabase.table("productos").insert(productos_a_insertar).execute()
-                            
-                            st.success(f"✅ ¡{len(productos_a_insertar)} productos procesados!")
-                            time.sleep(1.5); st.session_state.panel_privado = "catalogo"; st.rerun()
+                            st.success(f"✅ ¡{len(productos_a_insertar)} productos procesados!"); time.sleep(1.5); st.session_state.panel_privado = "catalogo"; st.rerun()
                         except Exception as e: st.error(f"Error: {e}")
 
         # CATÁLOGOS
@@ -618,13 +631,22 @@ else:
                 st.query_params["panel"] = "mis_pedidos"
                 st.rerun()
             st.write("---")
+            
+            # --- NUEVA SECCIÓN: PERFIL Y CONTRASEÑA ---
+            with st.expander("🔑 Mi Perfil / Contraseña"):
+                n_pwd = st.text_input("Nueva contraseña:", type="password", key="pwd_r")
+                if st.button("Actualizar", key="btn_pwd_r"):
+                    if n_pwd:
+                        supabase.table("usuarios").update({"contrasena": n_pwd}).eq("email", st.session_state.usuario_actual).execute()
+                        st.success("¡Contraseña actualizada!")
+                        
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 st.session_state.clear(); st.query_params.clear(); st.rerun()
 
         if st.session_state.panel_privado == "ingresar_ndp":
             col_in, _ = st.columns([2, 1])
             with col_in:
-                cod_input = st.text_input("Ingresar código NdP:", placeholder="Ej: NDP-A1B2C").strip()
+                cod_input = st.text_input("Ingresar código NdP (Manual):", placeholder="Ej: NDP-A1B2C").strip()
                 if st.button("Validar y Cargar Catálogo", type="primary"):
                     if cod_input:
                         res = supabase.table("notas_pedido").select("*").eq("codigo_acceso", cod_input).execute()
@@ -667,8 +689,7 @@ else:
                         with c2:
                             st.markdown(f"**{p['articulo']}**<br><span style='color:gray; font-size:14px;'>{p.get('color','')}</span>", unsafe_allow_html=True)
                         with c3:
-                            c_sug_text, c_sug_btn = st.columns([3, 2])
-                            with c_sug_text: st.markdown(f"<span style='font-size:12px; color:#17A2B8;'>Curva Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size:12px; color:#17A2B8;'>Curva Fábrica: {p.get('curva','N/A')}</span>", unsafe_allow_html=True)
                             talles = []
                             if str(p.get('talle_desde','')).isdigit() and str(p.get('talle_hasta','')).isdigit():
                                 talles = [str(i) for i in range(int(p['talle_desde']), int(p['talle_hasta'])+1)]
@@ -676,20 +697,21 @@ else:
                             if not talles: talles = ["Único"]
                             
                             curva_arr = [int(x) for x in p.get('curva','').split('-') if x.isdigit()] if p.get('curva') != 'N/A' else []
-                            
-                            with c_sug_btn:
-                                if p.get('curva') != 'N/A' and st.button("📥 Cargar curva", key=f"sug_{p['id']}"):
-                                    for i, t in enumerate(talles): st.session_state[f"t_{p['id']}_{t}"] = curva_arr[i] if i < len(curva_arr) else 0
-                                    st.rerun()
 
                             cols_talles = st.columns(len(talles))
                             detalle_temporal = {}
                             
                             for i, t in enumerate(talles):
                                 with cols_talles[i]:
+                                    # CARGA PREDETERMINADA DE LA CURVA SUGERIDA
+                                    val_sugerido = curva_arr[i] if i < len(curva_arr) else 0
+                                    
                                     if f"t_{p['id']}_{t}" not in st.session_state:
-                                        if str(p['id']) in st.session_state[f"cart_{cod}"]: st.session_state[f"t_{p['id']}_{t}"] = st.session_state[f"cart_{cod}"][str(p['id'])]["curva_elegida"].get(t, 0)
-                                        else: st.session_state[f"t_{p['id']}_{t}"] = 0
+                                        if str(p['id']) in st.session_state[f"cart_{cod}"]: 
+                                            st.session_state[f"t_{p['id']}_{t}"] = st.session_state[f"cart_{cod}"][str(p['id'])]["curva_elegida"].get(t, val_sugerido)
+                                        else: 
+                                            st.session_state[f"t_{p['id']}_{t}"] = val_sugerido
+                                            
                                     val = st.number_input(t, min_value=0, step=1, key=f"t_{p['id']}_{t}")
                                     if val > 0: detalle_temporal[t] = val
 
@@ -728,7 +750,7 @@ else:
                             st.session_state.ndp_activa = None; st.success("¡Enviado!"); time.sleep(2); st.session_state.panel_privado = "mis_pedidos"; st.rerun()
 
         elif st.session_state.panel_privado == "mis_pedidos":
-            st.title("📦 Mis Pedidos Históricos")
+            st.title("📦 Mis Pedidos")
             res_pedidos = supabase.table("notas_pedido").select("*").eq("revendedor_email", st.session_state.usuario_actual).execute().data or []
             
             with st.expander("🔍 Filtros de Búsqueda"):
@@ -754,10 +776,22 @@ else:
             c2.metric("Pares Comprados", f"{sum(p['pares_totales'] for p in finalizados)}")
             c3.metric("NdP Mostradas", f"{len(pedidos_filtrados)}")
             st.write("---")
+            
             for ndp in sorted(pedidos_filtrados, key=lambda x: x['id'], reverse=True):
                 fecha_str = pd.to_datetime(ndp.get('created_at')).strftime('%d/%m/%Y %H:%M') if ndp.get('created_at') else 'Sin fecha'
                 with st.expander(f"[{ndp['estado']}] | Fábrica: {ndp['proveedor_email']} | Total: ${ndp['monto_total']:,.0f} | 📅 {fecha_str}"):
-                    c_desc, c_cod = st.columns([3, 1])
+                    c_desc, c_btn_acc = st.columns([3, 1])
                     c_desc.write(f"**Categoría:** {ndp['categoria_compartida']} | **Desc:** {ndp.get('descuento', '0')}%")
-                    with c_cod: st.code(ndp['codigo_acceso'], language=None)
-                    if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
+                    
+                    if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): 
+                        mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
+                    
+                    # --- NUEVO BOTÓN: CONTINUAR PEDIDO DIRECTAMENTE ---
+                    elif ndp['estado'] == "En Proceso": 
+                        st.info("El pedido está abierto pero sin finalizar.")
+                        with c_btn_acc:
+                            if st.button("🛒 Abrir / Continuar Pedido", key=f"open_{ndp['id']}", type="primary"):
+                                st.session_state.ndp_activa = ndp['codigo_acceso']
+                                st.session_state.panel_privado = "ingresar_ndp"
+                                st.query_params["panel"] = "ingresar_ndp"
+                                st.rerun()
