@@ -88,11 +88,59 @@ def calcular_precio_descuento_cascada(precio_base, desc_str):
         return precio, True if descuentos else False
     except: return float(precio_base), False
 
-def mostrar_detalle_pedido(detalle_json, codigo_pedido):
+def renderizar_menu_perfil():
+    with st.expander("🔑 Mi Perfil / Seguridad"):
+        st.markdown("**1. Cambiar Nombre de Marca (Público)**")
+        nuevo_nombre = st.text_input("Nombre de Marca:", value=st.session_state.marca_actual, key="nm_marca")
+        if st.button("Actualizar Nombre", use_container_width=True):
+            if nuevo_nombre.strip() and nuevo_nombre != st.session_state.marca_actual:
+                check = supabase.table("usuarios").select("id").eq("nombre_marca", nuevo_nombre).execute()
+                if len(check.data) > 0: st.error("❌ Ese nombre ya está en uso por otro usuario.")
+                else:
+                    supabase.table("usuarios").update({"nombre_marca": nuevo_nombre}).eq("email", st.session_state.usuario_actual).execute()
+                    st.session_state.marca_actual = nuevo_nombre
+                    st.success("✅ Nombre actualizado.")
+                    time.sleep(1); st.rerun()
+                    
+        st.write("---")
+        st.markdown("**2. Cambiar Contraseña**")
+        pwd_actual = st.text_input("Contraseña actual:", type="password", key="pwd_act")
+        pwd_nueva = st.text_input("Nueva contraseña:", type="password", key="pwd_n1")
+        pwd_conf = st.text_input("Repetir nueva contraseña:", type="password", key="pwd_n2")
+        if st.button("Actualizar Contraseña", use_container_width=True):
+            if pwd_actual and pwd_nueva and pwd_conf:
+                user_data = supabase.table("usuarios").select("contrasena").eq("email", st.session_state.usuario_actual).execute()
+                if user_data.data[0]['contrasena'] != pwd_actual: st.error("❌ La contraseña actual es incorrecta.")
+                elif pwd_nueva != pwd_conf: st.error("❌ Las nuevas contraseñas no coinciden.")
+                else:
+                    supabase.table("usuarios").update({"contrasena": pwd_nueva}).eq("email", st.session_state.usuario_actual).execute()
+                    st.success("✅ Contraseña actualizada.")
+
+def mostrar_detalle_pedido(detalle_json, codigo_pedido, con_precios=True):
     if not detalle_json: return
+    
+    st.markdown("#### Detalle Visual")
+    for p_id, data in detalle_json.items():
+        cc1, cc2, cc3 = st.columns([1, 4, 2], vertical_alignment="center")
+        with cc1:
+            if data.get("foto_url"):
+                st.image(data["foto_url"], use_container_width=True)
+                if st.button("🔍 Ver", key=f"z_det_{codigo_pedido}_{p_id}"): dialog_ampliar_imagen(data["foto_url"], data.get("articulo", ""))
+        with cc2:
+            st.markdown(f"**{data.get('articulo', '')}**")
+            curva_str = " | ".join([f"T-{k}: {v}" for k,v in data.get("curva_elegida", {}).items()])
+            st.caption(f"Curva: {curva_str}")
+        with cc3:
+            st.markdown(f"Pares: **{data.get('pares_totales', 0)}**")
+            if con_precios:
+                subt = data.get('precio_unitario', 0) * data.get('pares_totales', 0)
+                st.markdown(f"Subtotal: **${subt:,.0f}**")
+    
+    st.write("---")
+    st.markdown("#### Exportar a Excel")
     filas = []
     for p_id, data in detalle_json.items():
-        fila = {"Artículo": data.get("articulo", ""), "Precio Unit. ($)": data.get("precio_unitario", 0), "Pares Totales": data.get("pares_totales", 0)}
+        fila = {"Artículo": data.get("articulo", ""), "Precio Unit. ($)": data.get("precio_unitario", 0) if con_precios else 0, "Pares Totales": data.get("pares_totales", 0)}
         for talle, cant in data.get("curva_elegida", {}).items(): fila[f"T-{talle}"] = cant
         filas.append(fila)
     if filas:
@@ -110,13 +158,11 @@ def mostrar_detalle_pedido(detalle_json, codigo_pedido):
 def obtener_plantilla_excel():
     df_template = pd.DataFrame({
         "Categoría": ["Zapatillas"], "Artículo": ["Zapa Urban"], "Color": ["Negro"], "Descripción": ["Suela inyectada"],
-        "Precio": [15000], "Tipo Curva": ["Numérica Simple"], "Talle Desde": ["35"],
-        "Talle Hasta": ["40"], "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"],
-        "URL Foto (Opcional)": [""], "URL Video (Opcional)": [""]
+        "Precio": [15000], "Tipo Curva": ["Numérica Simple"], "Talle Desde": ["35"], "Talle Hasta": ["40"],
+        "Cantidades (Ej: 2-2-3-2-2-1)": ["2-2-3-2-2-1"], "URL Foto (Opcional)": [""], "URL Video (Opcional)": [""]
     })
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_template.to_excel(writer, index=False, sheet_name='Plantilla')
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer: df_template.to_excel(writer, index=False, sheet_name='Plantilla')
     return buffer.getvalue()
 
 # ========================================================
@@ -139,10 +185,7 @@ def dialog_editar_producto(p):
     n_precio = st.number_input("Precio ($)", value=float(p['precio']))
     n_vid = st.text_input("URL Video YouTube", value=p.get('video_url', '') or '')
     if st.button("Guardar Cambios", type="primary", use_container_width=True):
-        supabase.table("productos").update({
-            "articulo": n_art, "color": n_col, "descripcion": n_desc, 
-            "precio": n_precio, "video_url": n_vid
-        }).eq("id", p['id']).execute()
+        supabase.table("productos").update({"articulo": n_art, "color": n_col, "descripcion": n_desc, "precio": n_precio, "video_url": n_vid}).eq("id", p['id']).execute()
         st.rerun()
 
 @st.dialog("Subir Foto del Producto")
@@ -166,6 +209,9 @@ def dialog_ampliar_imagen(url, articulo):
 @st.dialog("Compartir Código NdP")
 def dialog_compartir_categoria(categoria):
     st.write(f"Compartiendo: **{categoria}**")
+    
+    tipo_cat = st.radio("Formato a compartir", ["Catálogo de Venta (Con Precios)", "Muestrario (Sin Precios)"])
+    
     res_clientes = supabase.table("notas_pedido").select("nombre_cliente_referencia").eq("proveedor_email", st.session_state.usuario_actual).execute()
     clientes_unicos = sorted(list(set([c['nombre_cliente_referencia'] for c in res_clientes.data if c.get('nombre_cliente_referencia')])))
     
@@ -178,24 +224,28 @@ def dialog_compartir_categoria(categoria):
         res_desc = supabase.table("notas_pedido").select("descuento").eq("proveedor_email", st.session_state.usuario_actual).eq("nombre_cliente_referencia", cliente_final).execute()
         historial_desc = sorted(list(set([d['descuento'] for d in res_desc.data if d.get('descuento') and d['descuento'] != "0"])))
 
-    if historial_desc: opcion_desc = st.selectbox(f"Descuentos de {cliente_final}", ["-- Sin Descuento --", "-- Crear Nuevo --"] + historial_desc)
-    else: opcion_desc = st.selectbox("Descuento", ["-- Sin Descuento --", "-- Crear Nuevo --"])
-
-    if opcion_desc == "-- Crear Nuevo --": descuento_final = st.text_input("Desc. en Cascada (Ej: 10+5)").strip()
-    elif opcion_desc == "-- Sin Descuento --": descuento_final = "0"
-    else: descuento_final = opcion_desc
+    if tipo_cat == "Muestrario (Sin Precios)":
+        descuento_final = "0"
+    else:
+        if historial_desc: opcion_desc = st.selectbox(f"Descuentos de {cliente_final}", ["-- Sin Descuento --", "-- Crear Nuevo --"] + historial_desc)
+        else: opcion_desc = st.selectbox("Descuento", ["-- Sin Descuento --", "-- Crear Nuevo --"])
+        if opcion_desc == "-- Crear Nuevo --": descuento_final = st.text_input("Desc. en Cascada (Ej: 10+5)").strip()
+        elif opcion_desc == "-- Sin Descuento --": descuento_final = "0"
+        else: descuento_final = opcion_desc
     
     if st.button("Generar Enlace", type="primary"):
         if cliente_final:
             codigo = f"NDP-{uuid.uuid4().hex[:5].upper()}"
+            cat_guardar = f"{categoria}|MUESTRARIO" if tipo_cat == "Muestrario (Sin Precios)" else categoria
             try:
                 supabase.table("notas_pedido").insert({
-                    "codigo_acceso": codigo, "proveedor_email": st.session_state.usuario_actual, "nombre_cliente_referencia": cliente_final, "categoria_compartida": categoria, "descuento": descuento_final
+                    "codigo_acceso": codigo, "proveedor_email": st.session_state.usuario_actual, 
+                    "nombre_cliente_referencia": cliente_final, "categoria_compartida": cat_guardar, "descuento": descuento_final
                 }).execute()
                 st.success("✅ ¡Código Creado!")
                 link_magico = f"https://tunombredeweb.com/?codigo={codigo}"
                 st.code(link_magico)
-                st.info("Copia el enlace de arriba y envíalo al cliente por WhatsApp. No necesitarán copiar el código, entrarán directo.")
+                st.info("Copia el enlace y envíalo al cliente por WhatsApp. Entrarán directo.")
             except Exception as e: st.error(f"Error: {e}")
         else: st.warning("Debes ingresar el nombre del cliente.")
 
@@ -216,7 +266,7 @@ def dialog_duplicar_categoria(cat_name):
         else: st.warning("Ingresa un nombre diferente al original.")
 
 @st.cache_data(show_spinner=False)
-def generar_pdf_catalogo(productos, marca, titulo_cat):
+def generar_pdf_catalogo(productos, marca, titulo_cat, con_precios=True):
     try:
         from fpdf import FPDF
         pdf = FPDF(orientation="P", unit="mm", format="A4")
@@ -226,7 +276,10 @@ def generar_pdf_catalogo(productos, marca, titulo_cat):
         pdf.cell(0, 10, f"CATÁLOGO MAYORISTA - {marca}", ln=True, align="C")
         pdf.set_font("helvetica", style="I", size=12)
         pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, 6, f"Categoría: {titulo_cat}", ln=True, align="C")
+        
+        titulo_mostrar = titulo_cat.replace("|MUESTRARIO", "")
+        pdf.cell(0, 6, f"Categoría: {titulo_mostrar}", ln=True, align="C")
+        if not con_precios: pdf.cell(0, 6, "(Muestrario Exclusivo)", ln=True, align="C")
         pdf.ln(6)
         for p in productos:
             x_start, y_start = pdf.get_x(), pdf.get_y()
@@ -248,8 +301,9 @@ def generar_pdf_catalogo(productos, marca, titulo_cat):
                 pdf.cell(40, 6, f"Talles: {p['talle_desde']} al {p['talle_hasta']}", ln=False)
                 pdf.set_xy(110, y_start + 11); pdf.set_font("courier", style="B", size=9); pdf.set_text_color(23, 162, 184)
                 pdf.cell(40, 5, f"Curva: {p.get('curva','')}", ln=False)
-            pdf.set_xy(150, y_start + 7); pdf.set_font("helvetica", style="B", size=14); pdf.set_text_color(40, 167, 69)
-            pdf.cell(45, 8, f"${p['precio']:,.0f}", ln=False, align="R")
+            if con_precios:
+                pdf.set_xy(150, y_start + 7); pdf.set_font("helvetica", style="B", size=14); pdf.set_text_color(40, 167, 69)
+                pdf.cell(45, 8, f"${p['precio']:,.0f}", ln=False, align="R")
             pdf.set_text_color(0, 0, 0); pdf.set_y(y_start + 24)
         return bytes(pdf.output())
     except: return None
@@ -323,34 +377,16 @@ else:
             st.success("🏭 Panel Fábrica")
             st.write("---")
             if st.button("📦 Notas de Pedido", use_container_width=True): 
-                st.session_state.panel_privado = "pedidos"
-                st.query_params["panel"] = "pedidos"
-                st.rerun()
+                st.session_state.panel_privado = "pedidos"; st.query_params["panel"] = "pedidos"; st.rerun()
             if st.button("👞 Mis Catálogos", use_container_width=True): 
-                st.session_state.cat_activa = None
-                st.session_state.panel_privado = "catalogo"
-                st.query_params["panel"] = "catalogo"
-                st.rerun()
+                st.session_state.cat_activa = None; st.session_state.panel_privado = "catalogo"; st.query_params["panel"] = "catalogo"; st.rerun()
             if st.button("➕ Cargar Calzado", use_container_width=True): 
-                st.session_state.panel_privado = "carga"
-                st.query_params["panel"] = "carga"
-                st.rerun()
+                st.session_state.panel_privado = "carga"; st.query_params["panel"] = "carga"; st.rerun()
             st.write("---")
             
-            with st.expander("🔑 Mi Perfil / Contraseña"):
-                with st.form("form_pwd_f", clear_on_submit=True):
-                    n_pwd1 = st.text_input("Nueva contraseña:", type="password")
-                    n_pwd2 = st.text_input("Confirmar contraseña:", type="password")
-                    if st.form_submit_button("Actualizar", type="primary"):
-                        if n_pwd1 and n_pwd2:
-                            if n_pwd1 == n_pwd2:
-                                supabase.table("usuarios").update({"contrasena": n_pwd1}).eq("email", st.session_state.usuario_actual).execute()
-                                st.success("¡Contraseña actualizada!")
-                            else:
-                                st.error("❌ Las contraseñas no coinciden.")
+            renderizar_menu_perfil()
             
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):
-                st.session_state.clear(); st.query_params.clear(); st.rerun()
+            if st.button("🚪 Cerrar Sesión", use_container_width=True): st.session_state.clear(); st.query_params.clear(); st.rerun()
 
         if st.session_state.panel_privado == "pedidos":
             st.title("📦 Mis Notas de Pedido")
@@ -383,11 +419,16 @@ else:
             
             for ndp in sorted(pedidos_filtrados, key=lambda x: x['id'], reverse=True):
                 fecha_str = pd.to_datetime(ndp.get('created_at')).strftime('%d/%m/%Y %H:%M') if ndp.get('created_at') else 'Sin fecha'
-                with st.expander(f"[{ndp['estado']}] | Cliente: {ndp['nombre_cliente_referencia']} | Total: ${ndp['monto_total']:,.0f} | 📅 {fecha_str}"):
+                
+                es_muestrario = "|MUESTRARIO" in ndp['categoria_compartida']
+                cat_mostrar = ndp['categoria_compartida'].replace("|MUESTRARIO", "")
+                titulo_total = f"Total: ${ndp['monto_total']:,.0f}" if not es_muestrario else "Muestrario (Sin Precio)"
+                
+                with st.expander(f"[{ndp['estado']}] | Cliente: {ndp['nombre_cliente_referencia']} | {titulo_total} | 📅 {fecha_str}"):
                     c_desc, c_cod = st.columns([3, 1])
-                    c_desc.write(f"**Categoría:** {ndp['categoria_compartida']} | **Descuento:** {ndp.get('descuento', '0')}%")
+                    c_desc.write(f"**Categoría:** {cat_mostrar} | **Descuento:** {ndp.get('descuento', '0')}%")
                     with c_cod: st.code(ndp['codigo_acceso'], language=None)
-                    if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
+                    if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'], not es_muestrario)
                     elif ndp['estado'] == "En Proceso": st.info("El cliente está armando el pedido en este momento.")
 
         elif st.session_state.panel_privado == "carga":
@@ -454,7 +495,6 @@ else:
                         val = st.number_input(f"T-{talle}", min_value=0, step=1, value=1, key=f"talle_{i}_{fk}")
                         valores_curva.append(val)
                 
-                # CÁLCULOS EN TIEMPO REAL PARA LA FÁBRICA
                 total_pares_curva = sum(valores_curva)
                 curva_final_str = "-".join([str(v) for v in valores_curva])
                 
@@ -465,7 +505,7 @@ else:
                 with col_p: precio = st.number_input("Precio de Lista ($)", min_value=0.0, key=f"num_precio_{fk}")
                 with col_v: video = st.text_input("URL de YouTube (Opcional)", placeholder="Ej: https://youtu.be/...", key=f"txt_vid_{fk}")
                 with col_t:
-                    st.write("Total de la Curva completa:")
+                    st.write("Total de la Curva:")
                     st.markdown(f"<h3 style='color:#00a650; margin-top:0px;'>${(precio * total_pares_curva):,.0f}</h3>", unsafe_allow_html=True)
                 
                 foto = st.file_uploader("Subir Foto (Máx 250KB)", type=["jpg", "png", "jpeg"], key=f"file_foto_{fk}")
@@ -493,10 +533,7 @@ else:
                                 
                                 st.session_state.form_key += 1
                                 st.success("✅ ¡Cargado!")
-                                time.sleep(1)
-                                st.session_state.panel_privado = "catalogo"
-                                st.query_params["panel"] = "catalogo"
-                                st.rerun()
+                                time.sleep(1); st.session_state.panel_privado = "catalogo"; st.query_params["panel"] = "catalogo"; st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
 
             elif tipo_carga == "Carga Masiva (Excel)":
@@ -570,27 +607,29 @@ else:
                     st.info("Aún no tienes productos en tu catálogo.")
             else:
                 cat_name = st.session_state.cat_activa
-                c_back, c_titulo, c_add, c_comp, c_pdf = st.columns([1, 2.5, 1.5, 1.5, 1.5], vertical_alignment="bottom")
+                c_back, c_titulo, c_add, c_comp, c_pdf_btn = st.columns([1, 2.5, 1.5, 1.5, 2.5], vertical_alignment="bottom")
                 with c_back:
                     if st.button("🔙 Volver"): st.session_state.cat_activa = None; st.rerun()
                 with c_titulo:
                     st.markdown(f"<h2 style='color: #FFB300; margin-bottom: 0px;'>📁 {cat_name}</h2>", unsafe_allow_html=True)
                 with c_add:
                     if st.button("➕ Añadir Calzado", use_container_width=True, type="primary"):
-                        st.session_state.cat_preseleccionada = cat_name
-                        st.session_state.panel_privado = "carga"
-                        st.query_params["panel"] = "carga"
-                        st.rerun()
+                        st.session_state.cat_preseleccionada = cat_name; st.session_state.panel_privado = "carga"; st.query_params["panel"] = "carga"; st.rerun()
                 with c_comp:
                     if st.button("🔗 Compartir", use_container_width=True): dialog_compartir_categoria(cat_name)
                 
                 res_prod = supabase.table("productos").select("*").eq("proveedor", st.session_state.usuario_actual).eq("categoria", cat_name).execute()
                 prods_cat = sorted(res_prod.data or [], key=lambda x: str(x.get('articulo', '')).lower())
                 
-                with c_pdf:
-                    pdf_data = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name)
-                    if pdf_data: st.download_button("📥 PDF", data=pdf_data, file_name=f"{cat_name}.pdf", mime="application/pdf", use_container_width=True)
-                
+                with c_pdf_btn:
+                    c_pdf1, c_pdf2 = st.columns(2)
+                    with c_pdf1:
+                        pdf_con = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name, con_precios=True)
+                        if pdf_con: st.download_button("📥 PDF Venta", data=pdf_con, file_name=f"{cat_name}.pdf", mime="application/pdf")
+                    with c_pdf2:
+                        pdf_sin = generar_pdf_catalogo(prods_cat, st.session_state.marca_actual, cat_name, con_precios=False)
+                        if pdf_sin: st.download_button("📥 PDF Muestrario", data=pdf_sin, file_name=f"{cat_name}_Muestrario.pdf", mime="application/pdf")
+
                 st.write("---")
                 for p in prods_cat:
                     with st.container(border=True):
@@ -626,29 +665,14 @@ else:
             st.warning("🛒 Panel Revendedor")
             st.write("---")
             if st.button("🛒 Ingresar código NdP", use_container_width=True): 
-                st.session_state.panel_privado = "ingresar_ndp"
-                st.query_params["panel"] = "ingresar_ndp"
-                st.rerun()
+                st.session_state.panel_privado = "ingresar_ndp"; st.query_params["panel"] = "ingresar_ndp"; st.rerun()
             if st.button("📦 Mis Pedidos", use_container_width=True): 
-                st.session_state.panel_privado = "mis_pedidos"
-                st.query_params["panel"] = "mis_pedidos"
-                st.rerun()
+                st.session_state.panel_privado = "mis_pedidos"; st.query_params["panel"] = "mis_pedidos"; st.rerun()
             st.write("---")
             
-            with st.expander("🔑 Mi Perfil / Contraseña"):
-                with st.form("form_pwd_r", clear_on_submit=True):
-                    n_pwd1 = st.text_input("Nueva contraseña:", type="password")
-                    n_pwd2 = st.text_input("Confirmar contraseña:", type="password")
-                    if st.form_submit_button("Actualizar", type="primary"):
-                        if n_pwd1 and n_pwd2:
-                            if n_pwd1 == n_pwd2:
-                                supabase.table("usuarios").update({"contrasena": n_pwd1}).eq("email", st.session_state.usuario_actual).execute()
-                                st.success("¡Contraseña actualizada!")
-                            else:
-                                st.error("❌ Las contraseñas no coinciden.")
+            renderizar_menu_perfil()
                         
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):
-                st.session_state.clear(); st.query_params.clear(); st.rerun()
+            if st.button("🚪 Cerrar Sesión", use_container_width=True): st.session_state.clear(); st.query_params.clear(); st.rerun()
 
         if st.session_state.panel_privado == "ingresar_ndp":
             col_in, _ = st.columns([2, 1])
@@ -675,17 +699,21 @@ else:
                 desc_str = ndp_data.get('descuento', '0')
                 precio_desc_ejemplo, hay_descuento = calcular_precio_descuento_cascada(100, desc_str)
                 
+                es_muestrario = "|MUESTRARIO" in ndp_data['categoria_compartida']
+                cat_display = ndp_data['categoria_compartida'].replace("|MUESTRARIO", "")
+                
                 st.write("---")
-                if hay_descuento:
-                    st.markdown(f"<h3 style='color:#00a650;'>📦 Pedido Activo: {ndp_data['categoria_compartida']} <span style='font-size:16px; background-color:#FFB300; padding:3px 8px; border-radius:5px; color:black;'>Desc: {desc_str}%</span></h3>", unsafe_allow_html=True)
+                if es_muestrario:
+                    st.markdown(f"<h3 style='color:#00a650;'>📦 Muestrario Activo: {cat_display} <span style='font-size:16px; background-color:#17A2B8; padding:3px 8px; border-radius:5px; color:white;'>Sin Precios</span></h3>", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"<h3 style='color:#00a650;'>📦 Pedido Activo: {ndp_data['categoria_compartida']}</h3>", unsafe_allow_html=True)
+                    if hay_descuento: st.markdown(f"<h3 style='color:#00a650;'>📦 Pedido Activo: {cat_display} <span style='font-size:16px; background-color:#FFB300; padding:3px 8px; border-radius:5px; color:black;'>Desc: {desc_str}%</span></h3>", unsafe_allow_html=True)
+                    else: st.markdown(f"<h3 style='color:#00a650;'>📦 Pedido Activo: {cat_display}</h3>", unsafe_allow_html=True)
                 
                 prods = supabase.table("productos").select("*").eq("proveedor", ndp_data['proveedor_email'])
-                if ndp_data['categoria_compartida'] != "Todo el Catálogo": prods = prods.eq("categoria", ndp_data['categoria_compartida'])
+                if cat_display != "Todo el Catálogo": prods = prods.eq("categoria", cat_display)
                 prods = prods.order("articulo").execute().data
                 
-                # --- PRECARGA DEL CARRITO CON LA CURVA SUGERIDA DESDE EL INICIO ---
+                # PRECARGA AUTOMATICA DE CURVA SUGERIDA
                 if f"cart_{cod}" not in st.session_state: 
                     st.session_state[f"cart_{cod}"] = {}
                     for p in prods:
@@ -704,16 +732,13 @@ else:
                             
                         if detalle_temp:
                             st.session_state[f"cart_{cod}"][str(p['id'])] = {
-                                "articulo": p['articulo'],
-                                "precio_unitario": precio_final,
-                                "pares_totales": sum(detalle_temp.values()),
-                                "curva_elegida": detalle_temp
+                                "articulo": p['articulo'], "foto_url": p.get('foto_url', ''), "precio_unitario": precio_final,
+                                "pares_totales": sum(detalle_temp.values()), "curva_elegida": detalle_temp
                             }
 
                 for p in prods:
                     precio_final, _ = calcular_precio_descuento_cascada(p['precio'], desc_str)
                     
-                    # --- FORMULARIO CERRADO POR PRODUCTO (EVITA REFRESH MASIVO) ---
                     with st.form(key=f"form_prod_{p['id']}_{cod}", border=True):
                         c1, c2, c3, c4 = st.columns([1, 2, 6, 2], vertical_alignment="center")
                         with c1:
@@ -721,11 +746,10 @@ else:
                         with c2:
                             st.markdown(f"**{p['articulo']}**<br><span style='color:gray; font-size:14px;'>{p.get('color','')}</span>", unsafe_allow_html=True)
                         with c3:
-                            # Leer lo guardado actualmente en el carrito para mostrar totales parciales
                             guardado = st.session_state[f"cart_{cod}"].get(str(p['id']), {}).get("curva_elegida", {})
                             pares_prod = sum(guardado.values())
                             
-                            st.markdown(f"<span style='font-size:13px; color:#17A2B8;'>Curva de Fábrica: {p.get('curva','N/A')} &nbsp; | &nbsp; <b>Pares Cargados: {pares_prod}</b></span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size:13px; color:#17A2B8;'>Curva Sugerida: {p.get('curva','N/A')} &nbsp; | &nbsp; <b>Pares Cargados: {pares_prod}</b></span>", unsafe_allow_html=True)
                             
                             talles = []
                             if str(p.get('talle_desde','')).isdigit() and str(p.get('talle_hasta','')).isdigit():
@@ -740,9 +764,10 @@ else:
                                     st.number_input(t, min_value=0, step=1, value=val_def, key=f"in_{p['id']}_{t}")
                                     
                         with c4:
-                            if hay_descuento: st.markdown(f"<span style='text-decoration:line-through; color:gray; font-size:14px;'>${p['precio']:,.0f}</span>", unsafe_allow_html=True)
-                            st.markdown(f"<h4 style='color:#00a650; margin:0;'>${precio_final:,.0f}</h4>", unsafe_allow_html=True)
-                            if pares_prod > 0: st.caption(f"Subtotal: ${pares_prod * precio_final:,.0f}")
+                            if not es_muestrario:
+                                if hay_descuento: st.markdown(f"<span style='text-decoration:line-through; color:gray; font-size:14px;'>${p['precio']:,.0f}</span>", unsafe_allow_html=True)
+                                st.markdown(f"<h4 style='color:#00a650; margin:0;'>${precio_final:,.0f}</h4>", unsafe_allow_html=True)
+                                if pares_prod > 0: st.caption(f"Subtotal: ${pares_prod * precio_final:,.0f}")
                             
                             if st.form_submit_button("✅ Aplicar / Modificar", type="secondary"):
                                 nuevo_detalle = {}
@@ -752,14 +777,11 @@ else:
                                 
                                 if nuevo_detalle:
                                     st.session_state[f"cart_{cod}"][str(p['id'])] = {
-                                        "articulo": p['articulo'],
-                                        "precio_unitario": precio_final,
-                                        "pares_totales": sum(nuevo_detalle.values()),
-                                        "curva_elegida": nuevo_detalle
+                                        "articulo": p['articulo'], "foto_url": p.get('foto_url', ''), "precio_unitario": precio_final,
+                                        "pares_totales": sum(nuevo_detalle.values()), "curva_elegida": nuevo_detalle
                                     }
                                 else:
-                                    if str(p['id']) in st.session_state[f"cart_{cod}"]:
-                                        del st.session_state[f"cart_{cod}"][str(p['id'])]
+                                    if str(p['id']) in st.session_state[f"cart_{cod}"]: del st.session_state[f"cart_{cod}"][str(p['id'])]
                                 st.rerun()
                                 
                 st.write("---")
@@ -767,23 +789,34 @@ else:
                 total_plata = sum(item["pares_totales"] * item["precio_unitario"] for item in st.session_state[f"cart_{cod}"].values())
                 c_tot1, c_tot2, c_btn = st.columns([3, 3, 4], vertical_alignment="center")
                 c_tot1.markdown(f"### Pares Guardados: {total_pares}")
-                c_tot2.markdown(f"### Total General: ${total_plata:,.0f}")
+                if not es_muestrario:
+                    c_tot2.markdown(f"### Total General: ${total_plata:,.0f}")
                 
                 with c_btn:
-                    if st.button("✅ Finalizar Pedido Definitivo", type="primary", use_container_width=True):
+                    if st.button("✅ Enviar Pedido Definitivo", type="primary", use_container_width=True):
                         if not st.session_state[f"cart_{cod}"]: st.error("No tienes ningún producto aplicado.")
                         else:
-                            supabase.table("notas_pedido").update({"estado": "Finalizado", "monto_total": total_plata, "pares_totales": total_pares, "detalle_json": st.session_state[f"cart_{cod}"]}).eq("id", ndp_data['id']).execute()
+                            m_total = total_plata if not es_muestrario else 0
+                            supabase.table("notas_pedido").update({"estado": "Finalizado", "monto_total": m_total, "pares_totales": total_pares, "detalle_json": st.session_state[f"cart_{cod}"]}).eq("id", ndp_data['id']).execute()
                             st.session_state.ndp_activa = None; st.success("¡Enviado!"); time.sleep(2); st.session_state.panel_privado = "mis_pedidos"; st.rerun()
 
         elif st.session_state.panel_privado == "mis_pedidos":
             st.title("📦 Mis Pedidos")
             res_pedidos = supabase.table("notas_pedido").select("*").eq("revendedor_email", st.session_state.usuario_actual).execute().data or []
             
+            # --- MAPEO INTELIGENTE DE NOMBRES DE FÁBRICAS ---
+            res_provs = supabase.table("usuarios").select("email, nombre_marca").eq("rol", "proveedor").execute()
+            mapa_fabricas = {u['email']: u['nombre_marca'] for u in res_provs.data} if res_provs.data else {}
+            
             with st.expander("🔍 Filtros de Búsqueda"):
                 f_col1, f_col2, f_col3 = st.columns(3)
                 fechas = f_col1.date_input("Rango de Fechas", [])
-                provs_unicos = sorted(list(set([p['proveedor_email'] for p in res_pedidos if p.get('proveedor_email')])))
+                
+                nombres_fabricas_usadas = set()
+                for p in res_pedidos:
+                    if p.get('proveedor_email'): nombres_fabricas_usadas.add(mapa_fabricas.get(p['proveedor_email'], p['proveedor_email']))
+                provs_unicos = sorted(list(nombres_fabricas_usadas))
+                
                 prov_filtro = f_col2.selectbox("Fábrica", ["Todos"] + provs_unicos)
                 estado_filtro = f_col3.selectbox("Estado", ["Todos", "Enviado", "En Proceso", "Finalizado"])
             
@@ -794,8 +827,11 @@ else:
                 pasa_fecha = True
                 if len(fechas) == 2 and p_date:
                     if not (fechas[0] <= p_date <= fechas[1]): pasa_fecha = False
-                if pasa_fecha and (prov_filtro == "Todos" or p.get('proveedor_email') == prov_filtro) and (estado_filtro == "Todos" or p.get('estado') == estado_filtro):
-                    pedidos_filtrados.append(p)
+                
+                nombre_fabrica_actual = mapa_fabricas.get(p.get('proveedor_email'), p.get('proveedor_email'))
+                pasa_prov = (prov_filtro == "Todos" or nombre_fabrica_actual == prov_filtro)
+                pasa_estado = (estado_filtro == "Todos" or p.get('estado') == estado_filtro)
+                if pasa_fecha and pasa_prov and pasa_estado: pedidos_filtrados.append(p)
 
             finalizados = [p for p in pedidos_filtrados if p['estado'] == 'Finalizado']
             c1, c2, c3 = st.columns(3)
@@ -806,18 +842,21 @@ else:
             
             for ndp in sorted(pedidos_filtrados, key=lambda x: x['id'], reverse=True):
                 fecha_str = pd.to_datetime(ndp.get('created_at')).strftime('%d/%m/%Y %H:%M') if ndp.get('created_at') else 'Sin fecha'
-                with st.expander(f"[{ndp['estado']}] | Fábrica: {ndp['proveedor_email']} | Total: ${ndp['monto_total']:,.0f} | 📅 {fecha_str}"):
+                nombre_fabrica = mapa_fabricas.get(ndp['proveedor_email'], ndp['proveedor_email'])
+                
+                es_muestrario = "|MUESTRARIO" in ndp['categoria_compartida']
+                cat_mostrar = ndp['categoria_compartida'].replace("|MUESTRARIO", "")
+                titulo_total = f"Total: ${ndp['monto_total']:,.0f}" if not es_muestrario else "Muestrario (Sin Precio)"
+
+                with st.expander(f"[{ndp['estado']}] | Fábrica: {nombre_fabrica} | {titulo_total} | 📅 {fecha_str}"):
                     c_desc, c_btn_acc = st.columns([3, 1])
-                    c_desc.write(f"**Categoría:** {ndp['categoria_compartida']} | **Desc:** {ndp.get('descuento', '0')}%")
+                    c_desc.write(f"**Categoría:** {cat_mostrar} | **Desc:** {ndp.get('descuento', '0')}%")
                     
                     if ndp['estado'] == "Finalizado" and ndp.get('detalle_json'): 
-                        mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'])
+                        mostrar_detalle_pedido(ndp['detalle_json'], ndp['codigo_acceso'], not es_muestrario)
                     
                     elif ndp['estado'] == "En Proceso": 
                         st.info("El pedido está abierto pero sin finalizar.")
                         with c_btn_acc:
                             if st.button("🛒 Abrir / Continuar Pedido", key=f"open_{ndp['id']}", type="primary"):
-                                st.session_state.ndp_activa = ndp['codigo_acceso']
-                                st.session_state.panel_privado = "ingresar_ndp"
-                                st.query_params["panel"] = "ingresar_ndp"
-                                st.rerun()
+                                st.session_state.ndp_activa = ndp['codigo_acceso']; st.session_state.panel_privado = "ingresar_ndp"; st.query_params["panel"] = "ingresar_ndp"; st.rerun()
